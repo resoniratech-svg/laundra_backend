@@ -1,0 +1,51 @@
+name: Laundry SaaS Backend CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: laundry-backend
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run verification tests
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/laundry-backend
+        SECRET_KEY: 96f849646beee05f25adfa9a6c9e0d165bf259bf6a3b2b814df39c1b48bf5b2d
+        ALGORITHM: HS256
+        ACCESS_TOKEN_EXPIRE_MINUTES: 1440
+        APP_NAME: "Laundry SaaS Backend"
+        APP_VERSION: "1.0.0"
+        DEBUG: True
+      run: |
+        python scripts/seed_data.py

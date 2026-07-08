@@ -1,0 +1,585 @@
+Perfect — that actually simplifies things a lot. We will now focus ONLY on backend (FastAPI + PostgreSQL + pgAdmin).
+
+No web UI, no mobile apps, no POS for now. Just a strong SaaS backend engine that can later support everything.
+
+🧠 FINAL SCOPE (BACKEND ONLY)
+
+You are building:
+
+👉 LAUNDRY SAAS BACKEND SYSTEM
+
+Includes:
+
+Multi-company SaaS (multi-tenant)
+Orders system
+Customers system
+Delivery system
+Payments system
+Pricing system
+Reports system
+Authentication system
+Role system (ONLY admin + delivery boy + customer)
+🚀 UPDATED STEP-BY-STEP PLAN (BACKEND ONLY)
+
+We will now rebuild the roadmap cleanly.
+
+🟢 PHASE 1 — SETUP (ENVIRONMENT READY)
+🎯 Goal:
+
+Prepare tools + project + database
+
+Tasks:
+Install Python
+Install PostgreSQL + pgAdmin
+Create database: laundry_saas
+Setup FastAPI project folder
+Setup virtual environment
+Install dependencies
+Output:
+
+✔ Empty backend running
+✔ DB created
+✔ Project structure ready
+
+🟡 PHASE 2 — DATABASE DESIGN (CORE SAAS FOUNDATION)
+🎯 Goal:
+
+Design full multi-tenant database
+
+🧠 CORE RULE
+
+Every table must include:
+
+tenant_id
+📦 TABLES YOU WILL CREATE
+1. companies (tenants)
+2. users (admin + delivery boy)
+3. customers
+4. services
+5. orders
+6. order_items
+7. payments
+8. deliveries
+9. expenses
+10. coupons
+Output:
+
+✔ Full SaaS database structure in pgAdmin
+
+🔵 PHASE 3 — FASTAPI CORE SETUP
+🎯 Goal:
+
+Run backend server
+
+Create:
+main.py
+app structure
+base API route
+Output:
+
+✔ API running at localhost
+✔ FastAPI working
+
+🟣 PHASE 4 — DATABASE CONNECTION
+🎯 Goal:
+
+Connect FastAPI → PostgreSQL
+
+Setup:
+SQLAlchemy
+DB engine
+Session management
+Output:
+
+✔ Backend connected to DB
+
+🟠 PHASE 5 — MULTI-TENANT SYSTEM (VERY IMPORTANT)
+🎯 Goal:
+
+SaaS logic (company separation)
+
+Logic:
+
+Every request includes:
+
+tenant_id
+Middleware:
+Extract tenant from header or token
+Inject into every query
+Output:
+
+✔ Multi-company system working
+
+🔴 PHASE 6 — AUTH SYSTEM
+🎯 Goal:
+
+Login + registration system
+
+Features:
+Company Admin:
+Register company
+Login
+Users:
+Admin login
+Delivery boy login
+Customer:
+OTP login (optional backend support)
+Output:
+
+✔ Secure authentication ready
+
+🟤 PHASE 7 — CORE BUSINESS MODULES
+🎯 Goal:
+
+Build real laundry logic
+
+🧾 ORDERS MODULE
+Create order
+Update status
+Track order lifecycle
+👥 CUSTOMERS MODULE
+Add customer
+View history
+Wallet
+🧺 SERVICES MODULE
+Create services
+Pricing system
+💰 PAYMENTS MODULE
+Cash / UPI tracking
+Invoice system
+🚚 DELIVERY MODULE
+Assign delivery boy
+Pickup/delivery tracking
+OTP verification
+🟢 Output:
+
+✔ Full backend SaaS engine ready
+
+🔷 PHASE 8 — REPORTING ENGINE
+🎯 Goal:
+
+Business analytics backend
+
+Reports:
+Daily sales
+Monthly sales
+Profit
+Orders status
+Customer reports
+Expense reports
+⚫ PHASE 9 — SECURITY + RULES
+JWT authentication
+Role-based access
+Tenant isolation security
+Input validation
+Logging system
+🚀 FINAL OUTPUT SYSTEM
+
+After all phases:
+
+You will have:
+
+👉 FULL BACKEND SAAS ENGINE
+
+✔ Multi-company system
+✔ Order management
+✔ Delivery tracking
+✔ Payment system
+✔ Customer system
+✔ Reports system
+✔ Secure APIs
+
+🧠 HOW WE WILL WORK NOW
+
+We will follow strict step flow:
+
+You do:
+Phase 1 setup
+Then you say:
+
+👉 “Phase 1 done”
+
+Then I give:
+Exact SQL scripts (copy-paste)
+FastAPI project code
+Folder structure
+Next phase instructions
+⚠️ IMPORTANT
+
+We will NOT move forward until:
+✔ You confirm current phase is completed
+
+✅ START NOW
+👉 FIRST TASK (PHASE 1)
+
+Do this only:
+
+Install:
+Python
+PostgreSQL
+pgAdmin
+Create database:
+laundry_saas
+Create empty folder:
+laundry-backend/
+
+When done reply:
+
+👉 Phase 1 done
+
+Then I will give you:
+✔ Full database SQL (ready for pgAdmin)
+✔ Exact FastAPI starter project
+✔ Folder structure (production-ready)
+
+laundry-backend done 
+
+Good — Phase 1 is complete. Now we move to Phase 2 (Database Design). This is the most important foundation of your entire SaaS.
+
+We will now build your full multi-tenant PostgreSQL schema (pgAdmin ready).
+
+🟡 PHASE 2 — DATABASE DESIGN (COPY → PASTE READY)
+🎯 Goal:
+
+Create complete SaaS database in PostgreSQL.
+
+🧠 CORE RULE (VERY IMPORTANT)
+
+Every table MUST include:
+
+tenant_id UUID NOT NULL
+
+This is what separates companies (ABC Laundry, Fresh Wash, etc.).
+
+🏗️ STEP 2.1 — CREATE DATABASE (pgAdmin)
+
+In pgAdmin run:
+
+CREATE DATABASE laundry_saas;
+🏢 STEP 2.2 — COMPANIES TABLE (TENANTS)
+CREATE TABLE companies (
+    id UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    phone VARCHAR(20),
+    email VARCHAR(255),
+    password TEXT,
+    subdomain VARCHAR(100),
+    logo TEXT,
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+👤 STEP 2.3 — USERS (ADMIN + DELIVERY BOY)
+CREATE TABLE users (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    name VARCHAR(255),
+    phone VARCHAR(20),
+    email VARCHAR(255),
+    password TEXT,
+    role VARCHAR(20), 
+    -- ADMIN | DELIVERY_BOY
+
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+👥 STEP 2.4 — CUSTOMERS
+CREATE TABLE customers (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    name VARCHAR(255),
+    phone VARCHAR(20),
+    email VARCHAR(255),
+    address TEXT,
+    wallet_balance NUMERIC DEFAULT 0,
+    loyalty_points INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+🧺 STEP 2.5 — SERVICES (WASH TYPES)
+CREATE TABLE services (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    name VARCHAR(255),
+    category VARCHAR(100),
+    price NUMERIC,
+    unit VARCHAR(20), 
+    -- KG / PIECE
+    created_at TIMESTAMP DEFAULT NOW()
+);
+🧾 STEP 2.6 — ORDERS (CORE TABLE)
+CREATE TABLE orders (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    customer_id UUID NOT NULL,
+
+    order_number VARCHAR(50),
+
+    status VARCHAR(30),
+    -- CREATED, RECEIVED, WASHING, IRONING, READY, OUT_FOR_DELIVERY, DELIVERED, CANCELLED
+
+    total_amount NUMERIC DEFAULT 0,
+    discount NUMERIC DEFAULT 0,
+    paid_amount NUMERIC DEFAULT 0,
+    payment_status VARCHAR(20),
+
+    qr_code TEXT,
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+🧺 STEP 2.7 — ORDER ITEMS
+CREATE TABLE order_items (
+    id UUID PRIMARY KEY,
+    order_id UUID NOT NULL,
+    service_id UUID NOT NULL,
+    quantity INT DEFAULT 1,
+    price NUMERIC DEFAULT 0
+);
+💰 STEP 2.8 — PAYMENTS
+CREATE TABLE payments (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    order_id UUID NOT NULL,
+    amount NUMERIC,
+    method VARCHAR(20),
+    -- CASH, UPI, CARD, WALLET
+
+    status VARCHAR(20) DEFAULT 'SUCCESS',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+🚚 STEP 2.9 — DELIVERY SYSTEM
+CREATE TABLE deliveries (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    order_id UUID NOT NULL,
+    delivery_boy_id UUID,
+
+    type VARCHAR(20),
+    -- PICKUP / DELIVERY
+
+    status VARCHAR(20),
+    -- ASSIGNED, PICKED, DELIVERED
+
+    otp VARCHAR(10),
+    delivered_at TIMESTAMP
+);
+💸 STEP 2.10 — EXPENSES
+CREATE TABLE expenses (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    title VARCHAR(255),
+    amount NUMERIC,
+    category VARCHAR(100),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+🎟️ STEP 2.11 — COUPONS (MARKETING)
+CREATE TABLE coupons (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    code VARCHAR(50),
+    discount_type VARCHAR(20),
+    value NUMERIC,
+    expiry_date DATE,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+🔗 STEP 2.12 — RELATIONSHIP FLOW
+Companies (tenant)
+   │
+   ├── Users (Admin + Delivery Boy)
+   ├── Customers
+   ├── Services
+   ├── Orders
+   │      ├── Order Items
+   │      ├── Payments
+   │      └── Deliveries
+   │
+   ├── Expenses
+   └── Coupons
+🧠 WHAT YOU JUST BUILT
+
+You now have:
+
+👉 FULL SAAS DATABASE FOUNDATION
+
+✔ Multi-company system
+✔ Order management
+✔ Delivery system
+✔ Payment system
+✔ Customer system
+✔ Pricing system
+✔ Marketing system
+
+⚠️ IMPORTANT RULE (NEXT PHASE)
+
+From now on in backend:
+
+Every API MUST include:
+
+tenant_id
+
+Otherwise data will mix between companies.
+
+🟢 YOUR TASK NOW (PHASE 2 COMPLETE CHECK)
+
+Do this in pgAdmin:
+
+✔ Create all tables
+✔ Run SQL scripts
+✔ Confirm no errors
+
+👉 THEN REPLY:
+"Phase 2 done"
+
+After that I will give you:
+
+🔵 PHASE 3 (FASTAPI CORE BACKEND)
+
+✔ Project structure
+✔ main.py
+✔ database connection
+✔ first working API
+✔ tenant middleware
+
+This is where your SaaS backend will actually start running 🚀
+
+phase 2 done 
+
+Good — Phase 2 is done. Now we start the real backend system (Phase 3).
+
+This is where your SaaS actually becomes a working API.
+
+🔵 PHASE 3 — FASTAPI CORE BACKEND (RUNNING SYSTEM)
+🎯 Goal of this phase:
+
+✔ Start FastAPI server
+✔ Connect to PostgreSQL
+✔ Create clean project structure
+✔ First working API
+✔ Prepare for multi-tenant system
+
+🧱 STEP 3.1 — INSTALL BACKEND DEPENDENCIES
+
+Inside your laundry-backend folder run:
+
+pip install fastapi uvicorn sqlalchemy psycopg2-binary python-dotenv
+📁 STEP 3.2 — CREATE PROJECT STRUCTURE
+
+Create this inside backend/:
+
+backend/
+│
+├── app/
+│   ├── main.py
+│   ├── config.py
+│   ├── database.py
+│
+│   ├── models/
+│   ├── routes/
+│   ├── services/
+│   ├── middleware/
+│   └── utils/
+│
+└── .env
+⚙️ STEP 3.3 — CREATE .env FILE
+DATABASE_URL=postgresql://postgres:password@localhost:5432/laundry_saas
+
+👉 Replace password with your PostgreSQL password
+
+🧠 STEP 3.4 — DATABASE CONNECTION (database.py)
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+⚙️ STEP 3.5 — CONFIG FILE (config.py)
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+🚀 STEP 3.6 — FIRST FASTAPI APP (main.py)
+from fastapi import FastAPI
+
+app = FastAPI(
+    title="Laundry SaaS Backend",
+    version="1.0"
+)
+
+@app.get("/")
+def home():
+    return {
+        "message": "Laundry SaaS Backend is running successfully 🚀"
+    }
+
+@app.get("/health")
+def health_check():
+    return {
+        "status": "OK",
+        "service": "Laundry SaaS API"
+    }
+▶️ STEP 3.7 — RUN SERVER
+
+Go to backend folder and run:
+
+uvicorn app.main:app --reload
+
+Then open:
+
+http://127.0.0.1:8000
+
+Also check:
+
+http://127.0.0.1:8000/docs
+🟢 WHAT YOU SHOULD SEE
+
+✔ FastAPI running
+✔ Swagger UI (/docs) working
+✔ Two APIs working:
+
+/
+/health
+🧠 WHAT YOU JUST ACHIEVED
+
+You now have:
+
+👉 WORKING BACKEND ENGINE
+
+✔ Server running
+✔ API system ready
+✔ Database connection prepared
+✔ Clean architecture started
+
+⚠️ IMPORTANT (DO NOT SKIP)
+
+Before moving to Phase 4, confirm:
+
+✔ FastAPI is running
+✔ /docs opens
+✔ No errors in terminal
+
+👉 YOUR TASK NOW
+
+Run backend and check:
+
+http://127.0.0.1:8000
+http://127.0.0.1:8000/docs
+✅ THEN REPLY:
+
+👉 "Phase 3 done"
+
+After that I will give you:
+
+🔥 PHASE 4 — MULTI-TENANT SYSTEM (CORE SAAS ENGINE)
+
+This is where:
+
+company isolation starts
+tenant middleware is built
+real SaaS logic begins
+
+This is the most important step in your entire project.
