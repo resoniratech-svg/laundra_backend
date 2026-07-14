@@ -42,6 +42,13 @@ from app.core.exceptions import (
 
 Base.metadata.create_all(bind=engine)
 
+# Drop NOT NULL constraint on audit_logs.tenant_id for platform-level logs
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE audit_logs ALTER COLUMN tenant_id DROP NOT NULL;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Failed to drop NOT NULL constraint on audit_logs.tenant_id: {e}")
+
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
