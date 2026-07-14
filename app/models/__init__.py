@@ -22,6 +22,7 @@ from app.models.attendance import Attendance
 from app.models.leave_request import LeaveRequest
 from app.models.customer_address import CustomerAddress
 from app.models.subscription_plan import SubscriptionPlan
+from app.models.customer_support_ticket import CustomerSupportTicket
 
 __all__ = [
     "Base",
@@ -40,6 +41,7 @@ __all__ = [
     "AuditLog",
     "Subscription",
     "SupportTicket",
+    "CustomerSupportTicket",
     "CompanyFeature",
     "PlatformSettings",
     "Announcement",

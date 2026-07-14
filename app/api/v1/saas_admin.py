@@ -22,8 +22,8 @@ def get_current_super_admin(current_user: User = Depends(get_current_user)) -> U
 
 class CompanyCreatePayload(BaseModel):
     name: str
-    email: EmailStr
-    phone: str
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
     address: Optional[str] = None
     street_name: Optional[str] = None
     area: Optional[str] = None
@@ -52,15 +52,57 @@ class AdminCreatePayload(BaseModel):
     password: str
     otp: str
 
+class AdminUpdatePayload(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+
 class AdminSendOTPPayload(BaseModel):
     email: EmailStr
+
+class VerifyOTPPayload(BaseModel):
+    email: EmailStr
+    otp: str
+
+@router.post("/verify-otp")
+def verify_otp(
+    payload: VerifyOTPPayload,
+    super_admin: User = Depends(get_current_super_admin)
+):
+    from app.api.v1.auth import MOCK_OTP_STORE
+    stored_otp = MOCK_OTP_STORE.get(payload.email)
+    if not stored_otp or stored_otp != payload.otp:
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+    MOCK_OTP_STORE.pop(payload.email, None)
+    return {"message": "OTP verified successfully"}
 
 @router.get("/companies")
 def list_all_companies(
     super_admin: User = Depends(get_current_super_admin),
     db: Session = Depends(get_db)
 ):
-    return db.query(Company).filter(Company.status != "DELETED").all()
+    companies = db.query(Company).filter(Company.status != "DELETED").all()
+    from app.models.subscription import Subscription
+    results = []
+    for c in companies:
+        sub = db.query(Subscription).filter(Subscription.tenant_id == c.id, Subscription.status == 'ACTIVE').first()
+        c_dict = {col.name: getattr(c, col.name) for col in c.__table__.columns}
+        if sub:
+            c_dict['subscription'] = {
+                'tier': sub.plan_name,
+                'expiresAt': sub.end_date,
+                'status': sub.status,
+                'price': sub.price,
+                'startDate': sub.start_date,
+                'maxAdmins': sub.max_admins,
+                'maxCashiers': sub.max_cashiers,
+                'maxDeliveryStaff': sub.max_delivery_staff,
+                'maxCustomers': sub.max_customers,
+                'maxOrdersPerMonth': sub.max_orders_per_month
+            }
+        else:
+            c_dict['subscription'] = None
+        results.append(c_dict)
+    return results
 
 @router.post("/companies", status_code=status.HTTP_201_CREATED)
 def create_company(
@@ -70,6 +112,15 @@ def create_company(
 ):
     from uuid import uuid4
     from app.core.security import get_password_hash
+    from app.models.user import User
+    
+    # Global Email Uniqueness Check (only if email is provided)
+    if payload.email:
+        existing_company = db.query(Company).filter(Company.email == payload.email).first()
+        existing_user = db.query(User).filter(User.email == payload.email).first()
+        if existing_company or existing_user:
+            raise HTTPException(status_code=400, detail="This email is already registered in the system.")
+
     # We create a dummy password for the company record itself since it's required by the model
     # Real login happens via Users table
     new_company = Company(
@@ -85,7 +136,7 @@ def create_company(
         gst_number=payload.gst_number,
         business_type=payload.business_type,
         logo=payload.logo,
-        status="ACTIVE"
+        status="ONBOARDING"
     )
     db.add(new_company)
     db.commit()
@@ -123,7 +174,7 @@ def update_company(
     return company
 
 @router.delete("/companies/{id}")
-def soft_delete_company(
+def hard_delete_company(
     id: UUID,
     super_admin: User = Depends(get_current_super_admin),
     db: Session = Depends(get_db)
@@ -131,21 +182,143 @@ def soft_delete_company(
     company = db.query(Company).filter(Company.id == id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
-    company.status = "DELETED"
+
+    # Cascade delete all company data in proper dependency order
+    try:
+        from app.models.review import Review
+        db.query(Review).filter(Review.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.customer_support_ticket import CustomerSupportTicket
+        db.query(CustomerSupportTicket).filter(CustomerSupportTicket.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.support_ticket import SupportTicket
+        db.query(SupportTicket).filter(SupportTicket.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.payment import Payment
+        db.query(Payment).filter(Payment.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.order_item import OrderItem
+        from app.models.order import Order
+        order_ids = [o.id for o in db.query(Order.id).filter(Order.tenant_id == id).all()]
+        if order_ids:
+            db.query(OrderItem).filter(OrderItem.order_id.in_(order_ids)).delete(synchronize_session=False)
+        db.query(Order).filter(Order.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.delivery import Delivery
+        db.query(Delivery).filter(Delivery.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.invoice import Invoice
+        db.query(Invoice).filter(Invoice.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.expense import Expense
+        db.query(Expense).filter(Expense.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.coupon import Coupon
+        db.query(Coupon).filter(Coupon.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.announcement import Announcement
+        db.query(Announcement).filter(Announcement.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.leave_request import LeaveRequest
+        db.query(LeaveRequest).filter(LeaveRequest.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.attendance import Attendance
+        db.query(Attendance).filter(Attendance.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.notification import Notification
+        db.query(Notification).filter(Notification.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.customer_address import CustomerAddress
+        from app.models.customer import Customer
+        customer_ids = [c.id for c in db.query(Customer.id).filter(Customer.tenant_id == id).all()]
+        if customer_ids:
+            db.query(CustomerAddress).filter(CustomerAddress.customer_id.in_(customer_ids)).delete(synchronize_session=False)
+        db.query(Customer).filter(Customer.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.service import Service
+        db.query(Service).filter(Service.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.subscription import Subscription
+        db.query(Subscription).filter(Subscription.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.company_feature import CompanyFeature
+        db.query(CompanyFeature).filter(CompanyFeature.company_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.platform_settings import PlatformSettings
+        db.query(PlatformSettings).filter(PlatformSettings.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    # Delete all users (admins, cashiers, delivery staff) belonging to this company
+    db.query(User).filter(User.tenant_id == id).delete(synchronize_session=False)
+
+    # Finally delete the company itself
+    db.query(Company).filter(Company.id == id).delete(synchronize_session=False)
     db.commit()
-    return {"message": "Company deleted successfully"}
+    return {"message": "Company and all associated data deleted successfully"}
 
 @router.post("/companies/{id}/status")
 def update_company_status(
     id: UUID,
-    status: str, # ACTIVE, SUSPENDED
+    status: str, # ACTIVE, SUSPENDED, ONBOARDING
     super_admin: User = Depends(get_current_super_admin),
     db: Session = Depends(get_db)
 ):
-    if status not in ["ACTIVE", "SUSPENDED"]:
+    if status not in ["ACTIVE", "SUSPENDED", "ONBOARDING"]:
         raise HTTPException(
             status_code=400,
-            detail="Invalid status. Must be ACTIVE or SUSPENDED"
+            detail="Invalid status. Must be ACTIVE, SUSPENDED, or ONBOARDING"
         )
         
     company = db.query(Company).filter(Company.id == id).first()
@@ -171,6 +344,11 @@ def send_admin_otp(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
+        
+    from app.models.user import User
+    existing_user = db.query(User).filter(User.email == payload.email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="This email is already registered to an existing account.")
         
     otp = str(random.randint(100000, 999999))
     MOCK_OTP_STORE[payload.email] = otp
@@ -216,6 +394,10 @@ def create_company_admin(
     from app.core.security import get_password_hash
     from app.api.v1.auth import MOCK_OTP_STORE
 
+    existing_user = db.query(User).filter(User.email == payload.email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="This email is already registered to an existing account.")
+
     stored_otp = MOCK_OTP_STORE.get(payload.email)
     if not stored_otp or stored_otp != payload.otp:
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
@@ -243,6 +425,14 @@ def create_company_admin(
         "admin": new_admin
     }
 
+@router.get("/admins")
+def get_all_admins(
+    super_admin: User = Depends(get_current_super_admin),
+    db: Session = Depends(get_db)
+):
+    from app.models.user import User
+    return db.query(User).filter(User.role == "ADMIN").all()
+
 @router.get("/companies/{company_id}/admins")
 def list_company_admins(
     company_id: UUID,
@@ -251,6 +441,27 @@ def list_company_admins(
 ):
     from app.models.user import User
     return db.query(User).filter(User.tenant_id == company_id, User.role == "ADMIN").all()
+
+@router.put("/admins/{admin_id}")
+def update_admin_details(
+    admin_id: UUID,
+    payload: AdminUpdatePayload,
+    super_admin: User = Depends(get_current_super_admin),
+    db: Session = Depends(get_db)
+):
+    from app.models.user import User
+    admin = db.query(User).filter(User.id == admin_id, User.role == "ADMIN").first()
+    if not admin:
+        raise HTTPException(status_code=404, detail="Admin not found")
+        
+    if payload.name is not None:
+        admin.name = payload.name
+    if payload.phone is not None:
+        admin.phone = payload.phone
+        
+    db.commit()
+    db.refresh(admin)
+    return admin
 
 @router.put("/admins/{admin_id}/status")
 def change_admin_status(
@@ -420,6 +631,14 @@ def list_company_features(
 class SubscriptionAssignPayload(BaseModel):
     plan_name: str
     days: int = 14
+    price: Optional[float] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    max_admins: Optional[int] = None
+    max_cashiers: Optional[int] = None
+    max_delivery_staff: Optional[int] = None
+    max_customers: Optional[int] = None
+    max_orders_per_month: Optional[int] = None
 
 class SubscriptionExtendPayload(BaseModel):
     days: int
@@ -442,18 +661,16 @@ def assign_tenant_subscription(
     plan_name = payload.plan_name.upper()
     plan_model = db.query(SubscriptionPlan).filter(SubscriptionPlan.name == plan_name).first()
     
-    if not plan_model and plan_name == "FREE_TRIAL":
+    if not plan_model:
         class MockPlan:
-            max_admins = 1
-            max_cashiers = 2
-            max_delivery_staff = 2
-            max_customers = 100
-            max_orders_per_month = 500
-            max_storage_mb = 500
-            max_api_requests = 500
+            max_admins = 5
+            max_cashiers = 10
+            max_delivery_staff = 15
+            max_customers = 5000
+            max_orders_per_month = 50000
+            max_storage_mb = 1024
+            max_api_requests = 10000
         plan_model = MockPlan()
-    elif not plan_model:
-        raise HTTPException(status_code=400, detail=f"Subscription plan '{plan_name}' does not exist.")
     
     sub = db.query(Subscription).filter(Subscription.tenant_id == tenant_id).first()
     if not sub:
@@ -465,14 +682,24 @@ def assign_tenant_subscription(
         
     sub.plan_name = plan_name
     sub.status = "ACTIVE"
-    sub.end_date = date.today() + timedelta(days=payload.days)
     
-    # Copy limits from plan
-    sub.max_admins = plan_model.max_admins
-    sub.max_cashiers = plan_model.max_cashiers
-    sub.max_delivery_staff = plan_model.max_delivery_staff
-    sub.max_customers = plan_model.max_customers
-    sub.max_orders_per_month = plan_model.max_orders_per_month
+    if payload.price is not None:
+        sub.price = payload.price
+        
+    if payload.start_date:
+        sub.start_date = date.fromisoformat(payload.start_date)
+        
+    if payload.end_date:
+        sub.end_date = date.fromisoformat(payload.end_date)
+    else:
+        sub.end_date = date.today() + timedelta(days=payload.days)
+    
+    # Copy limits from payload if provided, otherwise from plan
+    sub.max_admins = payload.max_admins if payload.max_admins is not None else plan_model.max_admins
+    sub.max_cashiers = payload.max_cashiers if payload.max_cashiers is not None else plan_model.max_cashiers
+    sub.max_delivery_staff = payload.max_delivery_staff if payload.max_delivery_staff is not None else plan_model.max_delivery_staff
+    sub.max_customers = payload.max_customers if payload.max_customers is not None else plan_model.max_customers
+    sub.max_orders_per_month = payload.max_orders_per_month if payload.max_orders_per_month is not None else plan_model.max_orders_per_month
     sub.max_storage_mb = plan_model.max_storage_mb
     sub.max_api_requests = plan_model.max_api_requests
     

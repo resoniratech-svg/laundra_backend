@@ -2,12 +2,17 @@ from fastapi import APIRouter
 from app.api.v1 import (
     auth, companies, users, customers, services, orders, payments, deliveries, expenses, coupons, reports, dashboard,
     invoices, audit_logs, saas_admin, subscriptions, support, mobile_staff, saas_plans, saas_monitoring,
-    saas_reports, saas_health, saas_support, reviews, notifications, portal
+    saas_reports, saas_health, saas_support, reviews, notifications, portal, leave_requests, portal_support,
+    admin_customer_support, announcements
 )
 
 router = APIRouter(prefix="/api/v1")
 
+router.include_router(announcements.router, prefix="/announcements", tags=["User Announcements"])
 router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+router.include_router(leave_requests.router, prefix="/leave-requests", tags=["Leave Requests"])
+router.include_router(portal_support.router, prefix="/portal/support", tags=["Customer Portal Support"])
+router.include_router(admin_customer_support.router, prefix="/admin/customer-support", tags=["Admin Customer Support"])
 router.include_router(companies.router, prefix="/companies", tags=["Companies"])
 router.include_router(users.router, prefix="/users", tags=["Users"])
 router.include_router(customers.router, prefix="/customers", tags=["Customers"])

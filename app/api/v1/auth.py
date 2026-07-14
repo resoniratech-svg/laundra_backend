@@ -61,6 +61,14 @@ def delivery_boy_send_otp(
 ):
     import random
     from app.core.email_service import send_otp_email
+    from app.models.user import User
+
+    existing = db.query(User).filter(User.email == payload.email).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is already registered"
+        )
     
     otp = str(random.randint(100000, 999999))
     MOCK_OTP_STORE[payload.email] = otp
@@ -71,6 +79,20 @@ def delivery_boy_send_otp(
         response["warning"] = "Platform SMTP not configured. Contact Super Admin."
         response["otp_debug"] = otp
     return response
+
+class VerifyOTPRequest(BaseModel):
+    email: EmailStr
+    otp: str
+
+@router.post("/delivery-boy/verify-otp")
+def delivery_boy_verify_otp(payload: VerifyOTPRequest):
+    stored_otp = MOCK_OTP_STORE.get(payload.email)
+    if not stored_otp or stored_otp != payload.otp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OTP code"
+        )
+    return {"message": "OTP verified successfully"}
 
 @router.post("/delivery-boy/register", status_code=status.HTTP_201_CREATED)
 def register_delivery_boy(
@@ -90,7 +112,10 @@ def register_delivery_boy(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company not found with the provided Company Code"
         )
-        
+
+    # Enforce subscription delivery staff limit
+    from app.core.subscription_limits import check_delivery_limit
+    check_delivery_limit(db, payload.company_code)
     existing = db.query(User).filter(User.email == payload.email).first()
     if existing:
         raise HTTPException(
@@ -128,12 +153,103 @@ def register_delivery_boy(
         "user_id": user.id
     }
 
+class CashierSendOTPRequest(BaseModel):
+    email: EmailStr
+
+class CashierRegisterRequest(BaseModel):
+    name: str
+    phone: str
+    email: EmailStr
+    password: str
+    otp: str
+    address: Optional[str] = None
+
+@router.post("/cashier/send-otp")
+def cashier_send_otp(
+    payload: CashierSendOTPRequest,
+    db: Session = Depends(get_db)
+):
+    import random
+    from app.core.email_service import send_otp_email
+    from app.models.user import User
+
+    existing = db.query(User).filter(User.email == payload.email).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is already registered"
+        )
+    
+    otp = str(random.randint(100000, 999999))
+    MOCK_OTP_STORE[payload.email] = otp
+    
+    email_sent = send_otp_email(db, payload.email, otp)
+    response = {"message": f"OTP sent successfully to {payload.email}"}
+    if not email_sent:
+        response["warning"] = "Platform SMTP not configured. Contact Super Admin."
+        response["otp_debug"] = otp
+    return response
+
+@router.post("/cashier/register", status_code=status.HTTP_201_CREATED)
+def register_cashier(
+    payload: CashierRegisterRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role not in ["ADMIN", "SUPER_ADMIN"]:
+        raise HTTPException(status_code=403, detail="Only admins can create cashiers")
+
+    # Enforce subscription cashier limit
+    from app.core.subscription_limits import check_cashier_limit
+    check_cashier_limit(db, current_user.tenant_id)
+
+    stored_otp = MOCK_OTP_STORE.get(payload.email)
+    if not stored_otp or stored_otp != payload.otp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OTP code"
+        )
+        
+    existing = db.query(User).filter(User.email == payload.email).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+        
+    user = User(
+        id=uuid4(),
+        tenant_id=current_user.tenant_id,
+        name=payload.name,
+        phone=payload.phone,
+        email=payload.email,
+        password=get_password_hash(payload.password),
+        role="CASHIER",
+        status="ACTIVE",
+        address=payload.address
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    
+    MOCK_OTP_STORE.pop(payload.email, None)
+    return {
+        "message": "Cashier created successfully.",
+        "user_id": user.id
+    }
+
 @router.post("/login", response_model=TokenResponse)
 def login(
     payload: LoginRequest,
     db: Session = Depends(get_db)
 ):
-    token_data = AuthService.login(db, email=payload.email, password=payload.password)
+    token_data = AuthService.login(
+        db, 
+        email=payload.email, 
+        password=payload.password,
+        tenant_id=payload.tenant_id,
+        role=payload.role
+    )
     if not token_data:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

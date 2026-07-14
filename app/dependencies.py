@@ -43,8 +43,11 @@ def get_current_user(
     token_data: dict = Depends(get_token_data),
     db: Session = Depends(get_db)
 ) -> User:
-    tenant_id = UUID(token_data["tenant_id"])
-    set_current_tenant_id(tenant_id)
+    if token_data.get("tenant_id") and token_data["tenant_id"] != "None":
+        tenant_id = UUID(token_data["tenant_id"])
+        set_current_tenant_id(tenant_id)
+    else:
+        set_current_tenant_id(None)
     
     user = user_repo.get_user_by_id(db, UUID(token_data["user_id"]))
     if not user:

@@ -15,9 +15,11 @@ router = APIRouter()
 expense_repo = ExpenseRepository()
 
 class ExpenseUpdate(BaseModel):
-    title: Optional[str] = None
+    description: Optional[str] = None
     amount: Optional[Decimal] = None
     category: Optional[str] = None
+    source: Optional[str] = None
+    date: Optional[str] = None
 
 @router.post("", response_model=ExpenseOut, status_code=status.HTTP_201_CREATED)
 def create_expense(

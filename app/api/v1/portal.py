@@ -217,7 +217,7 @@ def place_order(
             discount = min(discount, total_amount)
 
     order_id = uuid4()
-    order_number = f"ORD-{datetime.utcnow().strftime('%Y%m%d')}-{random.randint(1000, 9999)}"
+    order_number = str(random.randint(100000, 999999))
     
     # Calculate estimated delivery (Normal: 3 days, Express: 1 day)
     est_days = 1 if payload.is_express else 3

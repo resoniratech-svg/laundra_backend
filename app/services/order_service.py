@@ -16,9 +16,7 @@ from app.core.tenant import get_current_tenant_id
 class OrderService:
     @staticmethod
     def generate_order_number() -> str:
-        date_str = datetime.now().strftime("%Y%m%d")
-        rand_str = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
-        return f"ORD-{date_str}-{rand_str}"
+        return str(random.randint(100000, 999999))
 
     @staticmethod
     def create_order(

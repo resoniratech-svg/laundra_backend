@@ -20,6 +20,9 @@ customer_repo = CustomerRepository()
 class WalletUpdate(BaseModel):
     amount: Decimal
 
+class LoyaltyUpdate(BaseModel):
+    points: int
+
 class CustomerUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
@@ -28,6 +31,7 @@ class CustomerUpdate(BaseModel):
 
 class EmailOTPRequest(BaseModel):
     email: str
+    phone: Optional[str] = None
 
 @router.post("/send-otp")
 def send_otp_for_creation(
@@ -43,6 +47,26 @@ def send_otp_for_creation(
     from app.api.v1.auth import MOCK_OTP_STORE
     from app.core.email_service import send_otp_email
     
+    # Pre-validate duplicates before sending OTP
+    if payload.phone:
+        existing = db.query(Customer).filter(
+            Customer.phone == payload.phone,
+            Customer.tenant_id == current_admin.tenant_id
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Customer with this phone number already exists under this tenant"
+            )
+            
+    existing_user = db.query(User).filter(User.email == payload.email).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is already registered"
+        )
+
+    
     otp = str(random.randint(100000, 999999))
     MOCK_OTP_STORE[payload.email] = otp
     
@@ -55,6 +79,21 @@ def send_otp_for_creation(
         response["otp_debug"] = otp
     
     return response
+
+class VerifyOTPRequest(BaseModel):
+    email: str
+    otp: str
+
+@router.post("/verify-otp")
+def verify_otp_only(payload: VerifyOTPRequest):
+    from app.api.v1.auth import MOCK_OTP_STORE
+    stored_otp = MOCK_OTP_STORE.get(payload.email)
+    if not stored_otp or stored_otp != payload.otp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OTP code"
+        )
+    return {"message": "OTP verified successfully"}
 
 @router.post("", response_model=CustomerOut, status_code=status.HTTP_201_CREATED)
 def create_customer(
@@ -88,6 +127,10 @@ def create_customer(
             detail="Customer with this phone number already exists under this tenant"
         )
         
+    # Enforce subscription customer limit
+    from app.core.subscription_limits import check_customer_limit
+    check_customer_limit(db, current_admin.tenant_id)
+
     # Check duplicate User email
     existing_user = db.query(User).filter(User.email == customer_in.email).first()
     if existing_user:
@@ -137,7 +180,7 @@ def list_customers(
     current_admin: User = Depends(get_current_admin_or_cashier),
     db: Session = Depends(get_db)
 ):
-    return customer_repo.get_multi(db)
+    return customer_repo.get_multi(db, tenant_id=current_admin.tenant_id)
 
 @router.get("/{customer_id}", response_model=CustomerOut)
 def get_customer(
@@ -145,7 +188,7 @@ def get_customer(
     current_admin: User = Depends(get_current_admin_or_cashier),
     db: Session = Depends(get_db)
 ):
-    customer = customer_repo.get(db, customer_id)
+    customer = customer_repo.get(db, customer_id, tenant_id=current_admin.tenant_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -160,7 +203,7 @@ def update_customer(
     current_admin: User = Depends(get_current_admin_or_cashier),
     db: Session = Depends(get_db)
 ):
-    customer = customer_repo.get(db, customer_id)
+    customer = customer_repo.get(db, customer_id, tenant_id=current_admin.tenant_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -177,13 +220,62 @@ def delete_customer(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    customer = customer_repo.get(db, customer_id)
+    customer = customer_repo.get(db, customer_id, tenant_id=current_admin.tenant_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Customer not found"
         )
-    customer_repo.remove(db, id=customer_id)
+
+    # Delete all dependent records to avoid FK violations
+    try:
+        from app.models.review import Review
+        db.query(Review).filter(Review.customer_id == customer_id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.customer_support_ticket import CustomerSupportTicket
+        db.query(CustomerSupportTicket).filter(CustomerSupportTicket.customer_id == customer_id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.customer_address import CustomerAddress
+        db.query(CustomerAddress).filter(CustomerAddress.customer_id == customer_id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        db.query(Order).filter(Order.customer_id == customer_id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    # Delete associated user login record
+    associated_user = db.query(User).filter(User.email == customer.email, User.role == "CUSTOMER").first()
+    if associated_user:
+        db.delete(associated_user)
+
+    # Delete customer record
+    db.query(Customer).filter(Customer.id == customer_id).delete(synchronize_session=False)
+    db.commit()
+    return {"success": True, "message": "Customer and all associated data deleted successfully"}
+
+@router.delete("/by-email/{email}", status_code=status.HTTP_200_OK)
+def delete_customer_by_email(
+    email: str,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    customer = db.query(Customer).filter(Customer.email == email, Customer.tenant_id == current_admin.tenant_id).first()
+    if customer:
+        customer_repo.remove(db, id=customer.id)
+        
+    associated_user = db.query(User).filter(User.email == email, User.role == "CUSTOMER", User.tenant_id == current_admin.tenant_id).first()
+    if associated_user:
+        db.delete(associated_user)
+        
+    db.commit()
     return {"success": True, "message": "Customer deleted successfully"}
 
 @router.get("/{customer_id}/orders", response_model=List[OrderOut])
@@ -192,7 +284,7 @@ def get_customer_order_history(
     current_admin: User = Depends(get_current_admin_or_cashier),
     db: Session = Depends(get_db)
 ):
-    customer = customer_repo.get(db, customer_id)
+    customer = customer_repo.get(db, customer_id, tenant_id=current_admin.tenant_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -217,6 +309,23 @@ def get_customer_wallet(
     current_admin: User = Depends(get_current_admin_or_cashier),
     db: Session = Depends(get_db)
 ):
+    customer = customer_repo.get(db, customer_id, tenant_id=current_admin.tenant_id)
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found"
+        )
+    return {
+        "customer_id": customer.id,
+        "wallet_balance": customer.wallet_balance,
+        "loyalty_points": customer.loyalty_points
+    }
+
+@router.get("/{customer_id}/wallet-public")
+def get_customer_wallet_public(
+    customer_id: UUID,
+    db: Session = Depends(get_db)
+):
     customer = customer_repo.get(db, customer_id)
     if not customer:
         raise HTTPException(
@@ -236,6 +345,23 @@ def update_wallet_balance(
     current_admin: User = Depends(get_current_admin_or_cashier),
     db: Session = Depends(get_db)
 ):
+    customer = customer_repo.get(db, customer_id, tenant_id=current_admin.tenant_id)
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found"
+        )
+    customer.wallet_balance += payload.amount
+    db.commit()
+    db.refresh(customer)
+    return customer
+
+@router.post("/{customer_id}/add-funds", response_model=CustomerOut)
+def customer_add_funds(
+    customer_id: UUID,
+    payload: WalletUpdate,
+    db: Session = Depends(get_db)
+):
     customer = customer_repo.get(db, customer_id)
     if not customer:
         raise HTTPException(
@@ -243,6 +369,24 @@ def update_wallet_balance(
             detail="Customer not found"
         )
     customer.wallet_balance += payload.amount
+    db.commit()
+    db.refresh(customer)
+    return customer
+
+@router.post("/{customer_id}/loyalty", response_model=CustomerOut)
+def update_loyalty_points(
+    customer_id: UUID,
+    payload: LoyaltyUpdate,
+    current_admin: User = Depends(get_current_admin_or_cashier),
+    db: Session = Depends(get_db)
+):
+    customer = customer_repo.get(db, customer_id, tenant_id=current_admin.tenant_id)
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found"
+        )
+    customer.loyalty_points = max(0, customer.loyalty_points + payload.points)
     db.commit()
     db.refresh(customer)
     return customer
@@ -368,7 +512,7 @@ def generate_customer_qr(
     db: Session = Depends(get_db)
 ):
     from app.core.security import create_access_token
-    customer = customer_repo.get(db, customer_id)
+    customer = customer_repo.get(db, customer_id, tenant_id=current_admin.tenant_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -413,7 +557,7 @@ def get_customer_qr_image(
     """Returns the QR code directly as a PNG image. 
     Open this URL in a browser to view/download the QR code."""
     from app.core.security import create_access_token
-    customer = customer_repo.get(db, customer_id)
+    customer = customer_repo.get(db, customer_id, tenant_id=current_admin.tenant_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -453,7 +597,7 @@ def share_qr_whatsapp(
     db: Session = Depends(get_db)
 ):
     from app.core.security import create_access_token
-    customer = customer_repo.get(db, customer_id)
+    customer = customer_repo.get(db, customer_id, tenant_id=current_admin.tenant_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -492,7 +636,7 @@ def regenerate_qr(
     db: Session = Depends(get_db)
 ):
     import uuid
-    customer = customer_repo.get(db, customer_id)
+    customer = customer_repo.get(db, customer_id, tenant_id=current_admin.tenant_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -510,7 +654,7 @@ def disable_qr(
     current_admin: User = Depends(get_current_admin_or_cashier),
     db: Session = Depends(get_db)
 ):
-    customer = customer_repo.get(db, customer_id)
+    customer = customer_repo.get(db, customer_id, tenant_id=current_admin.tenant_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -522,4 +666,19 @@ def disable_qr(
     db.commit()
     return {"success": True, "message": "Customer QR disabled successfully. The customer cannot log in via QR until a new one is generated."}
 
-
+@router.get("/public/{customer_id}", response_model=CustomerOut)
+def get_public_customer(
+    customer_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """
+    Public endpoint used by the Customer Portal magic link to load customer data 
+    without requiring an admin token or password login.
+    """
+    customer = customer_repo.get(db, customer_id)
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found"
+        )
+    return customer

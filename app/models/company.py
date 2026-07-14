@@ -30,3 +30,7 @@ class Company(BaseModel):
     coupons: Mapped[List["Coupon"]] = relationship("Coupon", back_populates="company", cascade="all, delete-orphan")
     payments: Mapped[List["Payment"]] = relationship("Payment", back_populates="company", cascade="all, delete-orphan")
     deliveries: Mapped[List["Delivery"]] = relationship("Delivery", back_populates="company", cascade="all, delete-orphan")
+    subscription: Mapped["Subscription"] = relationship("Subscription", back_populates="company", cascade="all, delete-orphan", uselist=False)
+    notifications: Mapped[List["Notification"]] = relationship("Notification", cascade="all, delete-orphan")
+    support_tickets: Mapped[List["SupportTicket"]] = relationship("SupportTicket", cascade="all, delete-orphan")
+    reviews: Mapped[List["Review"]] = relationship("Review", cascade="all, delete-orphan")

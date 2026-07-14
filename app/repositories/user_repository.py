@@ -12,6 +12,14 @@ class UserRepository(BaseRepository[User]):
         # Query globally across all companies to locate the user during login
         return db.query(User).filter(User.email == email).first()
 
+    def find_for_login(self, db: Session, email: str, tenant_id: UUID | None = None, role: str | None = None) -> User | None:
+        query = db.query(User).filter(User.email == email)
+        if tenant_id:
+            query = query.filter(User.tenant_id == tenant_id)
+        if role:
+            query = query.filter(User.role == role)
+        return query.first()
+
     def get_user_by_id(self, db: Session, id: UUID) -> User | None:
         return db.query(User).filter(User.id == id).first()
 

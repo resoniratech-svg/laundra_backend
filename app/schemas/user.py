@@ -25,7 +25,7 @@ class UserCreate(UserBase):
 
 class UserOut(UserBase):
     id: UUID
-    tenant_id: UUID
+    tenant_id: Optional[UUID] = None
     status: str
     created_at: datetime
 
@@ -38,9 +38,14 @@ class CompanyRegisterRequest(BaseModel):
     phone: str
     password: str
 
+from typing import Optional
+from uuid import UUID
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    tenant_id: Optional[UUID] = None
+    role: Optional[str] = None
 
 class TokenResponse(BaseModel):
     access_token: str

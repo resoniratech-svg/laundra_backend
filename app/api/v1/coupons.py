@@ -46,8 +46,7 @@ def apply_coupon(
     db: Session = Depends(get_db)
 ):
     from app.models.coupon import Coupon
-    from app.core.tenant import get_current_tenant_id
-    tenant_id = get_current_tenant_id()
+    tenant_id = current_user.tenant_id
     
     coupon = db.query(Coupon).filter(
         Coupon.code == payload.code,
@@ -80,3 +79,18 @@ def apply_coupon(
         "value": coupon.value,
         "discount_applied": discount
     }
+
+@router.delete("/{coupon_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_coupon(
+    coupon_id: UUID,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    coupon = coupon_repo.get(db, coupon_id)
+    if not coupon or coupon.tenant_id != current_admin.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Coupon not found"
+        )
+    coupon_repo.remove(db, id=coupon_id)
+    return None

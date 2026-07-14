@@ -1,50 +1,41 @@
-from app.core.database import SessionLocal
+import os
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
+from sqlalchemy import text
+from app.core.database import engine, SessionLocal
 from app.models.user import User
-from app.models.company import Company
 from app.core.security import get_password_hash
 from uuid import uuid4
 
-def seed_super_admin():
-    db = SessionLocal()
+def run():
+    print("Altering table...")
+    with engine.begin() as conn:
+        conn.execute(text('ALTER TABLE users ALTER COLUMN tenant_id DROP NOT NULL;'))
     
-    # Check if super admin exists
-    super_admin = db.query(User).filter(User.role == "SUPER_ADMIN").first()
-    if not super_admin:
-        # Create a dummy company for the super admin (since tenant_id is required in User model)
-        # Or better, just get an existing company
-        company = db.query(Company).first()
-        if not company:
-            company = Company(
-                id=uuid4(),
-                name="System Company",
-                email="system@laundry.com",
-                phone="0000000000",
-                password=get_password_hash("dummy123"),
-                status="ACTIVE"
-            )
-            db.add(company)
-            db.commit()
-            db.refresh(company)
-            
-        super_admin = User(
+    print("Seeding SUPER_ADMIN...")
+    db = SessionLocal()
+    existing = db.query(User).filter(User.email == "superadmin@laundra.com").first()
+    if not existing:
+        admin = User(
             id=uuid4(),
-            tenant_id=company.id,
-            name="Super Admin",
-            email="superadmin@laundry.com",
-            phone="1234567890",
-            password=get_password_hash("admin123"),
+            tenant_id=None,
+            name="Platform Super Admin",
+            email="superadmin@laundra.com",
+            phone="0000000000",
+            password=get_password_hash("admin"),
             role="SUPER_ADMIN",
             status="ACTIVE"
         )
-        db.add(super_admin)
+        db.add(admin)
         db.commit()
-        print("Super Admin created: superadmin@laundry.com / admin123")
+        print("Created SUPER_ADMIN!")
     else:
-        # Reset password to ensure we know it
-        super_admin.password = get_password_hash("admin123")
-        super_admin.email = "superadmin@laundry.com"
+        existing.role = "SUPER_ADMIN"
+        existing.tenant_id = None
         db.commit()
-        print("Super Admin updated: superadmin@laundry.com / admin123")
+        print("Updated existing SUPER_ADMIN!")
 
 if __name__ == "__main__":
-    seed_super_admin()
+    run()

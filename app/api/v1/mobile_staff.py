@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from uuid import uuid4
+from uuid import uuid4, UUID
 from datetime import datetime, date, timedelta
 from typing import List, Optional
 from pydantic import BaseModel
@@ -11,6 +11,7 @@ from app.models.user import User
 from app.models.attendance import Attendance
 from app.models.leave_request import LeaveRequest
 from app.models.delivery import Delivery
+from app.models.customer_support_ticket import CustomerSupportTicket
 
 router = APIRouter()
 
@@ -232,3 +233,63 @@ def get_staff_announcements(
                 valid_super_anns.append(ann)
                 
     return sorted(company_anns + valid_super_anns, key=lambda x: x.scheduled_at, reverse=True)
+
+
+class MobileStaffTicketCreate(BaseModel):
+    subject: str
+    description: str
+
+class MobileStaffTicketOut(BaseModel):
+    id: UUID
+    subject: str
+    description: str
+    status: str
+    admin_response: Optional[str] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+@router.post("/support-tickets", response_model=MobileStaffTicketOut, status_code=status.HTTP_201_CREATED)
+def create_staff_ticket(
+    payload: MobileStaffTicketCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role not in ["DELIVERY_BOY", "DELIVERY_STAFF", "Delivery Boy", "Delivery Staff"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only delivery staff can raise support tickets"
+        )
+        
+    ticket = CustomerSupportTicket(
+        id=uuid4(),
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+        subject=payload.subject,
+        description=payload.description,
+        status="OPEN"
+    )
+    db.add(ticket)
+    db.commit()
+    db.refresh(ticket)
+    
+    # We map UUID to str just to match schema
+    return ticket
+
+@router.get("/support-tickets", response_model=List[MobileStaffTicketOut])
+def get_staff_tickets(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role not in ["DELIVERY_BOY", "DELIVERY_STAFF", "Delivery Boy", "Delivery Staff"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only delivery staff can view support tickets"
+        )
+        
+    tickets = db.query(CustomerSupportTicket).filter(
+        CustomerSupportTicket.user_id == current_user.id
+    ).order_by(CustomerSupportTicket.created_at.desc()).all()
+    
+    return tickets

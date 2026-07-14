@@ -7,9 +7,9 @@ from typing import List, Optional
 class User(BaseModel):
     __tablename__ = "users"
 
-    tenant_id: Mapped[UUID] = mapped_column(
+    tenant_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("companies.id"),
-        nullable=False
+        nullable=True
     )
     name: Mapped[Optional[str]]
     phone: Mapped[Optional[str]]
@@ -32,3 +32,5 @@ class User(BaseModel):
     # Relationships
     company: Mapped["Company"] = relationship("Company", back_populates="users")
     deliveries: Mapped[List["Delivery"]] = relationship("Delivery", back_populates="delivery_boy")
+    notifications: Mapped[List["Notification"]] = relationship("Notification", cascade="all, delete-orphan")
+    support_tickets: Mapped[List["SupportTicket"]] = relationship("SupportTicket", cascade="all, delete-orphan")

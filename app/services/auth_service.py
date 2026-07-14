@@ -63,8 +63,8 @@ class AuthService:
         return company, admin_user
 
     @staticmethod
-    def login(db: Session, *, email: str, password: str) -> dict:
-        user = user_repo.find_by_email(db, email)
+    def login(db: Session, *, email: str, password: str, tenant_id: UUID = None, role: str = None) -> dict:
+        user = user_repo.find_for_login(db, email, tenant_id, role)
         if not user or not verify_password(password, user.password):
             return None
             
@@ -78,6 +78,15 @@ class AuthService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Your account has been deactivated."
             )
+
+        # Enforce company suspension logic
+        if user.role != "SUPER_ADMIN" and user.tenant_id:
+            company = db.query(Company).filter(Company.id == user.tenant_id).first()
+            if company and company.status == "SUSPENDED":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Technical issue. Please try again later."
+                )
             
         if user.role not in ["SUPER_ADMIN", "CUSTOMER"]:
             from app.models.subscription import Subscription

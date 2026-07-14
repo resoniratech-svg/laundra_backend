@@ -29,6 +29,13 @@ def list_services(
 ):
     return service_repo.get_multi(db, tenant_id=current_user.tenant_id)
 
+@router.get("/public/{company_id}", response_model=List[ServiceOut])
+def list_public_services(
+    company_id: str,
+    db: Session = Depends(get_db)
+):
+    return service_repo.get_multi(db, tenant_id=company_id)
+
 @router.put("/{id}", response_model=ServiceOut)
 def update_service(
     id: UUID,

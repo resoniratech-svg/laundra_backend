@@ -17,6 +17,10 @@ from app.repositories.order_repository import OrderRepository
 router = APIRouter()
 order_repo = OrderRepository()
 
+# Store OTPs temporarily (In a real app, use Redis)
+# Format: { "order_id_action": "otp_code" }
+MOCK_ORDER_OTP_STORE = {}
+
 class OrderStatusUpdate(BaseModel):
     status: str  # CREATED, RECEIVED, WASHING, IRONING, READY, OUT_FOR_DELIVERY, DELIVERED, CANCELLED
 
@@ -27,6 +31,10 @@ def create_order(
     db: Session = Depends(get_db),
     _sub: bool = Depends(check_subscription_active)
 ):
+    # Enforce subscription monthly orders limit
+    from app.core.subscription_limits import check_monthly_orders_limit
+    check_monthly_orders_limit(db, current_admin.tenant_id)
+
     return OrderService.create_order(
         db,
         customer_id=order_in.customer_id,
@@ -53,7 +61,7 @@ def get_order(
     current_admin: User = Depends(get_current_admin_or_cashier),
     db: Session = Depends(get_db)
 ):
-    order = order_repo.get(db, id)
+    order = order_repo.get(db, id, tenant_id=current_admin.tenant_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -69,7 +77,7 @@ def update_order_status(
     current_admin: User = Depends(get_current_admin_or_cashier),
     db: Session = Depends(get_db)
 ):
-    order = order_repo.get(db, id)
+    order = order_repo.get(db, id, tenant_id=current_admin.tenant_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -142,7 +150,7 @@ def update_order(
     current_admin: User = Depends(get_current_admin_or_cashier),
     db: Session = Depends(get_db)
 ):
-    order = order_repo.get(db, id)
+    order = order_repo.get(db, id, tenant_id=current_admin.tenant_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -154,20 +162,99 @@ def update_order(
     return updated_order
 
 @router.delete("/{id}", status_code=status.HTTP_200_OK)
-def cancel_order(
+def delete_order(
     id: UUID,
     current_admin: User = Depends(get_current_admin_or_cashier),
     db: Session = Depends(get_db)
 ):
-    order = order_repo.get(db, id)
+    order = order_repo.get(db, id, tenant_id=current_admin.tenant_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Order not found"
         )
-    order.status = "CANCELLED"
+    # Hard delete: remove order items first, then the order itself
+    db.query(OrderItem).filter(OrderItem.order_id == id).delete()
+    db.delete(order)
     db.commit()
-    return {"success": True, "message": "Order cancelled successfully"}
+    return {"success": True, "message": "Order permanently deleted"}
+
+class OrderOtpSendPayload(BaseModel):
+    action: str  # 'pickup' or 'delivery'
+
+class OrderOtpVerifyPayload(BaseModel):
+    action: str  # 'pickup' or 'delivery'
+    otp: str
+
+@router.post("/{id}/send-otp")
+def send_order_otp(
+    id: UUID,
+    payload: OrderOtpSendPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    import random
+    from app.core.email_service import send_order_otp_email
+    from app.models.company import Company
+    
+    # We allow DELIVERY_BOY and ADMIN
+    order = order_repo.get(db, id)
+    if not order or order.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    customer = order.customer
+    if not customer or not customer.email:
+        raise HTTPException(status_code=400, detail="Customer has no registered email.")
+        
+    company = db.query(Company).filter(Company.id == current_user.tenant_id).first()
+    company_name = company.name if company else "our Laundry Platform"
+    
+    otp_code = f"{random.randint(100000, 999999)}"
+    store_key = f"{str(id)}_{payload.action}"
+    MOCK_ORDER_OTP_STORE[store_key] = otp_code
+    
+    email_sent = send_order_otp_email(db, customer.email, otp_code, payload.action, company_name)
+    if not email_sent:
+         raise HTTPException(status_code=500, detail="Failed to send OTP email.")
+         
+    return {"success": True, "message": f"OTP sent to {customer.email}"}
+
+@router.post("/{id}/verify-otp", response_model=OrderOut)
+def verify_order_otp(
+    id: UUID,
+    payload: OrderOtpVerifyPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # We allow DELIVERY_BOY and ADMIN
+    order = order_repo.get(db, id)
+    if not order or order.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    store_key = f"{str(id)}_{payload.action}"
+    expected_otp = MOCK_ORDER_OTP_STORE.get(store_key)
+    
+    if not expected_otp or expected_otp != payload.otp:
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+        
+    # Clear the OTP
+    del MOCK_ORDER_OTP_STORE[store_key]
+    
+    # Update order status based on action
+    if payload.action == "pickup":
+        order.status = "RECEIVED"
+        order.delivery_status = "Pending Delivery"
+    elif payload.action == "delivery":
+        order.status = "DELIVERED"
+        order.delivery_status = "Delivered"
+        order.payment_status = "PAID"
+        
+    db.commit()
+    db.refresh(order)
+    
+    # Populate items for response
+    order.items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
+    return order
 
 @router.post("/{id}/review", response_model=OrderOut)
 def review_order(
@@ -176,7 +263,7 @@ def review_order(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    order = order_repo.get(db, id)
+    order = order_repo.get(db, id, tenant_id=current_user.tenant_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -228,7 +315,7 @@ def reply_to_review(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    order = order_repo.get(db, id)
+    order = order_repo.get(db, id, tenant_id=current_admin.tenant_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -248,7 +335,7 @@ def toggle_review_visibility(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    order = order_repo.get(db, id)
+    order = order_repo.get(db, id, tenant_id=current_admin.tenant_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

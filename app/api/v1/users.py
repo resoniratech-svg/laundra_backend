@@ -96,7 +96,7 @@ def list_users(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    return user_repo.get_multi(db)
+    return user_repo.get_multi(db, tenant_id=current_admin.tenant_id)
 
 @router.put("/{user_id}", response_model=UserOut)
 def update_user(
@@ -105,7 +105,7 @@ def update_user(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    user = user_repo.get(db, user_id)
+    user = user_repo.get(db, user_id, tenant_id=current_admin.tenant_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -113,6 +113,32 @@ def update_user(
         )
     update_data = payload.model_dump(exclude_unset=True)
     return user_repo.update(db, db_obj=user, obj_in=update_data)
+
+@router.delete("/{user_id}", status_code=status.HTTP_200_OK)
+def delete_user(
+    user_id: UUID,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    from app.models.company import Company
+    from app.core.email_service import send_rejection_email
+    
+    user = user_repo.get(db, user_id, tenant_id=current_admin.tenant_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+        
+    # Send rejection email if user is pending
+    if user.status == "PENDING_APPROVAL" and user.role == "DELIVERY_BOY":
+        company = db.query(Company).filter(Company.id == user.tenant_id).first()
+        company_name = company.name if company else "our Laundry Platform"
+        send_rejection_email(db, user.email, company_name)
+        
+    db.delete(user)
+    db.commit()
+    return {"success": True, "message": "User permanently deleted"}
 
 @router.patch("/{user_id}/status", response_model=UserOut)
 def update_user_status(
@@ -126,7 +152,7 @@ def update_user_status(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Status must be ACTIVE or INACTIVE"
         )
-    user = user_repo.get(db, user_id)
+    user = user_repo.get(db, user_id, tenant_id=current_admin.tenant_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -144,7 +170,7 @@ def reset_user_password(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    user = user_repo.get(db, user_id)
+    user = user_repo.get(db, user_id, tenant_id=current_admin.tenant_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -232,7 +258,7 @@ def approve_delivery_boy(
         id=uuid4(),
         tenant_id=tenant_id,
         user_id=current_admin.id,
-        action=f"Approved delivery boy application for {user.email}. Account is now ACTIVE.",
+        action=f"Approved delivery staff application for {user.email} under company {company_name}. Account is now ACTIVE.",
         module="STAFF_MANAGEMENT"
     )
     db.add(audit_log)
@@ -247,6 +273,9 @@ def reject_delivery_boy(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
+    from app.models.company import Company
+    from app.core.email_service import send_rejection_email
+    
     tenant_id = current_admin.tenant_id
     
     user = db.query(User).filter(
@@ -260,6 +289,12 @@ def reject_delivery_boy(
         )
         
     user.status = "REJECTED"
+    
+    # Send email notification
+    company = db.query(Company).filter(Company.id == tenant_id).first()
+    company_name = company.name if company else "our Laundry Platform"
+    send_rejection_email(db, user.email, company_name)
+    
     db.commit()
     db.refresh(user)
     return user

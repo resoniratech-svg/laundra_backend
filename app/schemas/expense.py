@@ -5,14 +5,18 @@ from uuid import UUID
 from datetime import datetime
 
 class ExpenseBase(BaseModel):
-    title: Optional[str] = None
+    description: Optional[str] = None
     amount: Optional[Decimal] = None
     category: Optional[str] = None
+    source: Optional[str] = None
+    date: Optional[str] = None
 
 class ExpenseCreate(ExpenseBase):
-    title: str
+    description: str
     amount: Decimal
     category: str
+    source: str
+    date: str
 
 class ExpenseOut(ExpenseBase):
     id: UUID
