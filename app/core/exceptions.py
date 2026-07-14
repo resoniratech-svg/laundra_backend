@@ -1,3 +1,4 @@
+import traceback
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -32,21 +33,25 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
+    print("[SQLALCHEMY ERROR DETECTED]")
+    traceback.print_exc()
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "success": False,
-            "message": "A database error occurred",
+            "message": f"A database error occurred: {str(exc)}",
             "error_code": "DATABASE_ERROR"
         }
     )
 
 async def generic_exception_handler(request: Request, exc: Exception):
+    print("[GENERIC EXCEPTION DETECTED]")
+    traceback.print_exc()
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "success": False,
-            "message": "An unexpected server error occurred",
+            "message": f"An unexpected server error occurred: {str(exc)}",
             "error_code": "INTERNAL_SERVER_ERROR"
         }
     )
