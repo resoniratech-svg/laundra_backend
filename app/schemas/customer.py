@@ -11,7 +11,7 @@ class CustomerBase(BaseModel):
     address: Optional[str] = None
 
 class CustomerCreate(CustomerBase):
-    otp: str
+    otp: Optional[str] = ""
     password: Optional[str] = "customer123"
 
 class CustomerOut(CustomerBase):

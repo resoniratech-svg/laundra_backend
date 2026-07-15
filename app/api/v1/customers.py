@@ -104,19 +104,6 @@ def create_customer(
 ):
     from app.api.v1.auth import MOCK_OTP_STORE
     
-    if not customer_in.email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email is required to verify OTP"
-        )
-        
-    stored_otp = MOCK_OTP_STORE.get(customer_in.email)
-    if not stored_otp or stored_otp != customer_in.otp:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired OTP code"
-        )
-        
     existing = db.query(Customer).filter(
         Customer.phone == customer_in.phone,
         Customer.tenant_id == current_admin.tenant_id
@@ -131,13 +118,14 @@ def create_customer(
     from app.core.subscription_limits import check_customer_limit
     check_customer_limit(db, current_admin.tenant_id)
 
-    # Check duplicate User email
-    existing_user = db.query(User).filter(User.email == customer_in.email).first()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email is already registered"
-        )
+    if customer_in.email:
+        # Check duplicate User email
+        existing_user = db.query(User).filter(User.email == customer_in.email).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email is already registered"
+            )
         
     user_id = uuid4()
     from app.core.security import get_password_hash

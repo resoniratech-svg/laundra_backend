@@ -359,6 +359,7 @@ def send_admin_otp(
         
     otp = str(random.randint(100000, 999999))
     MOCK_OTP_STORE[payload.email] = otp
+    print(f"[OTP DEBUG] Generated company admin registration OTP for {payload.email}: {otp}")
     send_otp_email(db, payload.email, otp)
     
     return {"message": "OTP sent successfully to email", "otp_debug": otp}

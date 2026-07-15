@@ -72,6 +72,7 @@ def delivery_boy_send_otp(
     
     otp = str(random.randint(100000, 999999))
     MOCK_OTP_STORE[payload.email] = otp
+    print(f"[OTP DEBUG] Generated delivery-boy registration OTP for {payload.email}: {otp}")
     
     email_sent = send_otp_email(db, payload.email, otp)
     response = {"message": f"OTP sent successfully to {payload.email}"}
@@ -182,6 +183,7 @@ def cashier_send_otp(
     
     otp = str(random.randint(100000, 999999))
     MOCK_OTP_STORE[payload.email] = otp
+    print(f"[OTP DEBUG] Generated cashier registration OTP for {payload.email}: {otp}")
     
     email_sent = send_otp_email(db, payload.email, otp)
     response = {"message": f"OTP sent successfully to {payload.email}"}
@@ -276,7 +278,7 @@ class CustomerRegisterRequest(BaseModel):
     phone: str
     email: EmailStr
     password: str
-    otp: str
+    otp: Optional[str] = ""
     address: Optional[str] = None
 
 @router.post("/customer/send-otp")
@@ -313,13 +315,6 @@ def register_customer(
     payload: CustomerRegisterRequest,
     db: Session = Depends(get_db)
 ):
-    stored_otp = MOCK_OTP_STORE.get(payload.email)
-    if not stored_otp or stored_otp != payload.otp:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired OTP code"
-        )
-        
     existing = db.query(User).filter(User.email == payload.email).first()
     if existing:
         raise HTTPException(
