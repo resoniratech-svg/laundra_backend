@@ -522,14 +522,7 @@ def get_platform_metrics(
     # Orders & Revenue
     total_orders = db.query(func.count(Order.id)).scalar() or 0
     
-    # Calculate MRR based on active non-trial subscriptions (Approximation for now)
-    active_subs = db.query(Subscription.plan_name, func.count(Subscription.id)).filter(Subscription.status == "ACTIVE").group_by(Subscription.plan_name).all()
-    mrr = 0.0
-    for plan, count in active_subs:
-        # We should ideally fetch prices from SubscriptionPlan, but using defaults if not joined
-        if plan == "STARTER": mrr += count * 49.0
-        elif plan == "PROFESSIONAL": mrr += count * 99.0
-        elif plan == "ENTERPRISE": mrr += count * 299.0
+    mrr = float(db.query(func.sum(Subscription.price)).filter(Subscription.status == "ACTIVE").scalar() or 0.0)
 
     # Recent Data
     recent_registrations = db.query(Company.name, Company.created_at).order_by(Company.created_at.desc()).limit(5).all()
