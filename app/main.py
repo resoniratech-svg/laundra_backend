@@ -46,8 +46,10 @@ Base.metadata.create_all(bind=engine)
 try:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE audit_logs ALTER COLUMN tenant_id DROP NOT NULL;"))
+        conn.execute(text("DELETE FROM services WHERE name LIKE '%dtype: object%';"))
+        conn.execute(text("DELETE FROM services a USING services b WHERE a.id < b.id AND a.name = b.name AND a.category = b.category AND a.tenant_id = b.tenant_id;"))
 except Exception as e:
-    print(f"[STARTUP WARNING] Failed to drop NOT NULL constraint on audit_logs.tenant_id: {e}")
+    print(f"[STARTUP WARNING] Failed database startup migrations or cleanups: {e}")
 
 app = FastAPI(
     title=settings.APP_NAME,

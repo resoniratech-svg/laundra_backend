@@ -21,7 +21,7 @@ class BaseRepository(Generic[ModelType]):
     def get(self, db: Session, id: Any, tenant_id: Optional[UUID] = None) -> Optional[ModelType]:
         return self.get_query(db, tenant_id).filter(self.model.id == id).first()
 
-    def get_multi(self, db: Session, *, skip: int = 0, limit: int = 100, tenant_id: Optional[UUID] = None) -> List[ModelType]:
+    def get_multi(self, db: Session, *, skip: int = 0, limit: int = 10000, tenant_id: Optional[UUID] = None) -> List[ModelType]:
         return self.get_query(db, tenant_id).offset(skip).limit(limit).all()
 
     def create(self, db: Session, *, obj_in: dict) -> ModelType:

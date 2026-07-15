@@ -92,7 +92,10 @@ class ImportService:
 
         for index in range(start_idx, len(df)):
             row = df.iloc[index]
-            item_name = str(row[item_col]).strip()
+            val = row[item_col]
+            if hasattr(val, 'iloc'):
+                val = val.iloc[0]
+            item_name = str(val).strip()
             if not item_name or item_name == "nan":
                 continue
 
@@ -129,12 +132,12 @@ class ImportService:
                 ).first()
 
                 if existing:
-                    # Update missing values
+                    # Overwrite prices if different
                     updated = False
-                    if normal_price is not None and existing.price is None:
+                    if normal_price is not None and existing.price != normal_price:
                         existing.price = normal_price
                         updated = True
-                    if express_price is not None and existing.express_price is None:
+                    if express_price is not None and existing.express_price != express_price:
                         existing.express_price = express_price
                         updated = True
                     if updated:
@@ -156,6 +159,7 @@ class ImportService:
                         express_price=express_price
                     )
                     db.add(new_service)
+                    db.flush()  # Flush so it can be found in subsequent rows of this import
                     added_count += 1
 
         db.commit()
