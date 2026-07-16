@@ -154,7 +154,8 @@ def create_customer(
         address=customer_in.address or "",
         wallet_balance=Decimal("0.0"),
         loyalty_points=0,
-        qr_secret=uuid.uuid4().hex
+        qr_secret=uuid.uuid4().hex,
+        referral_code=customer_in.referral_code
     )
     db.add(new_customer)
     db.commit()

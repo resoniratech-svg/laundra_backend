@@ -9,6 +9,7 @@ class CustomerBase(BaseModel):
     phone: str
     email: Optional[EmailStr] = None
     address: Optional[str] = None
+    referral_code: Optional[str] = None
 
 class CustomerCreate(CustomerBase):
     otp: Optional[str] = ""
