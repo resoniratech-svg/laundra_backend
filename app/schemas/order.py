@@ -41,6 +41,12 @@ class OrderOut(OrderBase):
     review: Optional[str] = None
     review_reply: Optional[str] = None
     review_hidden: bool = False
+    pickup_address: Optional[str] = None
+    delivery_address: Optional[str] = None
+    special_instructions: Optional[str] = None
+    is_express: bool = False
+    pickup_date: Optional[datetime] = None
+    delivery_date: Optional[datetime] = None
     created_at: datetime
     items: List[OrderItemOut] = []
 
