@@ -25,6 +25,10 @@ class CustomerOut(CustomerBase):
     class Config:
         from_attributes = True
 
+class CustomerPublicOut(CustomerOut):
+    access_token: Optional[str] = None
+    token_type: Optional[str] = "Bearer"
+
 class CustomerLogin(BaseModel):
     phone: str
     tenant_id: UUID

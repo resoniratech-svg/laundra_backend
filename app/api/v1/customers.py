@@ -10,7 +10,7 @@ from app.dependencies import get_current_admin, get_current_admin_or_cashier, ch
 from app.models.user import User
 from app.models.customer import Customer
 from app.models.order import Order
-from app.schemas.customer import CustomerCreate, CustomerOut
+from app.schemas.customer import CustomerCreate, CustomerOut, CustomerPublicOut
 from app.schemas.order import OrderOut
 from app.repositories.customer_repository import CustomerRepository
 
@@ -654,7 +654,7 @@ def disable_qr(
     db.commit()
     return {"success": True, "message": "Customer QR disabled successfully. The customer cannot log in via QR until a new one is generated."}
 
-@router.get("/public/{customer_id}", response_model=CustomerOut)
+@router.get("/public/{customer_id}", response_model=CustomerPublicOut)
 def get_public_customer(
     customer_id: UUID,
     db: Session = Depends(get_db)
@@ -669,4 +669,13 @@ def get_public_customer(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Customer not found"
         )
+    
+    from app.core.security import create_access_token
+    token = create_access_token(
+        subject=customer.id,
+        role="CUSTOMER",
+        tenant_id=customer.tenant_id
+    )
+    customer.access_token = token
+    customer.token_type = "Bearer"
     return customer
