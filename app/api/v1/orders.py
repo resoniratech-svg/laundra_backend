@@ -40,7 +40,8 @@ def create_order(
         customer_id=order_in.customer_id,
         items_in=order_in.items,
         coupon_code=order_in.coupon_code,
-        tenant_id=current_admin.tenant_id
+        tenant_id=current_admin.tenant_id,
+        is_express=order_in.is_express
     )
 
 @router.get("", response_model=List[OrderOut])

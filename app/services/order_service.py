@@ -25,7 +25,8 @@ class OrderService:
         customer_id: UUID,
         items_in: list,
         coupon_code: str = None,
-        tenant_id: UUID = None
+        tenant_id: UUID = None,
+        is_express: bool = False
     ) -> Order:
         if not tenant_id:
             tenant_id = get_current_tenant_id()
@@ -61,14 +62,15 @@ class OrderService:
                     detail=f"Service not found: {item.service_id}"
                 )
             
-            item_total = service.price * item.quantity
+            price = service.express_price if (is_express and service.express_price is not None) else service.price
+            item_total = price * item.quantity
             total_amount += item_total
             
             order_item = OrderItem(
                 id=uuid4(),
                 service_id=service.id,
                 quantity=item.quantity,
-                price=service.price
+                price=price
             )
             items_to_create.append(order_item)
 
@@ -115,7 +117,8 @@ class OrderService:
             discount=discount,
             paid_amount=Decimal("0.0"),
             payment_status="UNPAID",
-            qr_code=f"https://laundrysaas.com/orders/{order_id}/qr"
+            qr_code=f"https://laundrysaas.com/orders/{order_id}/qr",
+            is_express=is_express
         )
         db.add(order)
         db.flush()

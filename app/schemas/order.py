@@ -25,6 +25,7 @@ class OrderBase(BaseModel):
 class OrderCreate(OrderBase):
     items: List[OrderItemCreate]
     coupon_code: Optional[str] = None
+    is_express: bool = False
 
 class OrderOut(OrderBase):
     id: UUID
