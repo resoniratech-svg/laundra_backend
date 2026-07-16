@@ -72,7 +72,8 @@ def verify_otp(
     stored_otp = MOCK_OTP_STORE.get(payload.email)
     if not stored_otp or stored_otp != payload.otp:
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
-    MOCK_OTP_STORE.pop(payload.email, None)
+    # Do not pop it here so it can be verified again during step 5 admin creation.
+    # It will be popped in create_company_admin.
     return {"message": "OTP verified successfully"}
 
 @router.get("/companies")
