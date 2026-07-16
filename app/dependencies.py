@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
@@ -40,11 +40,22 @@ def get_token_data(token: str = Depends(oauth2_scheme)) -> dict:
         raise credentials_exception
 
 def get_current_user(
+    request: Request,
     token_data: dict = Depends(get_token_data),
     db: Session = Depends(get_db)
 ) -> User:
+    tenant_id = None
+    tenant_header = request.headers.get("X-Tenant-ID")
+    
     if token_data.get("tenant_id") and token_data["tenant_id"] != "None":
         tenant_id = UUID(token_data["tenant_id"])
+    elif tenant_header:
+        try:
+            tenant_id = UUID(tenant_header)
+        except ValueError:
+            pass
+            
+    if tenant_id:
         set_current_tenant_id(tenant_id)
     else:
         set_current_tenant_id(None)
@@ -55,10 +66,14 @@ def get_current_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
+        
+    if user.role == "SUPER_ADMIN" and tenant_id:
+        user.tenant_id = tenant_id
+        
     return user
 
 def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role != "ADMIN":
+    if current_user.role not in ["ADMIN", "SUPER_ADMIN"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="The user does not have enough privileges"
@@ -74,7 +89,7 @@ def get_current_super_admin(current_user: User = Depends(get_current_user)) -> U
     return current_user
 
 def get_current_admin_or_cashier(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role not in ["ADMIN", "CASHIER"]:
+    if current_user.role not in ["ADMIN", "CASHIER", "SUPER_ADMIN"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="The user does not have enough privileges. Must be Admin or Cashier."
