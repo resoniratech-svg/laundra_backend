@@ -43,15 +43,34 @@ from app.core.exceptions import (
 Base.metadata.create_all(bind=engine)
 
 # Drop NOT NULL constraint on audit_logs.tenant_id for platform-level logs
+# Isolated migration 1
 try:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE audit_logs ALTER COLUMN tenant_id DROP NOT NULL;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 1 failed: {e}")
+
+# Isolated migration 2
+try:
+    with engine.begin() as conn:
         conn.execute(text("DELETE FROM services WHERE name LIKE '%dtype: object%';"))
         conn.execute(text("DELETE FROM services a USING services b WHERE a.id < b.id AND a.name = b.name AND a.category = b.category AND a.tenant_id = b.tenant_id;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 2 failed: {e}")
+
+# Isolated migration 3
+try:
+    with engine.begin() as conn:
         conn.execute(text("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS required_services JSON;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 3 failed: {e}")
+
+# Isolated migration 4
+try:
+    with engine.begin() as conn:
         conn.execute(text("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS name VARCHAR(100);"))
 except Exception as e:
-    print(f"[STARTUP WARNING] Failed database startup migrations or cleanups: {e}")
+    print(f"[STARTUP WARNING] Migration 4 failed: {e}")
 
 app = FastAPI(
     title=settings.APP_NAME,
