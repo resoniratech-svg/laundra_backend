@@ -13,6 +13,7 @@ class Coupon(BaseModel):
     code: Mapped[Optional[str]] = mapped_column(String(50))
     discount_type: Mapped[Optional[str]] = mapped_column(String(20))
     value: Mapped[Decimal] = mapped_column(Numeric)
+    start_date: Mapped[Optional[date]] = mapped_column(Date)
     expiry_date: Mapped[Optional[date]] = mapped_column(Date)
     required_services: Mapped[Optional[dict]] = mapped_column(JSON)
 

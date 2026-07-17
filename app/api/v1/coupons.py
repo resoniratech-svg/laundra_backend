@@ -37,7 +37,7 @@ def list_public_coupons(
     tenant_id: UUID,
     db: Session = Depends(get_db)
 ):
-    return coupon_repo.get_multi(db, tenant_id=tenant_id)
+    return coupon_repo.get_active_multi(db, tenant_id=tenant_id)
 
 @router.get("", response_model=List[CouponOut])
 def list_coupons(
