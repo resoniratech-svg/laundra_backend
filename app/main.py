@@ -52,6 +52,10 @@ try:
             conn.execute(text("ALTER TABLE coupons ADD COLUMN required_services JSON;"))
         except Exception:
             pass # Column already exists
+        try:
+            conn.execute(text("ALTER TABLE coupons ADD COLUMN name VARCHAR(100);"))
+        except Exception:
+            pass # Column already exists
 except Exception as e:
     print(f"[STARTUP WARNING] Failed database startup migrations or cleanups: {e}")
 
