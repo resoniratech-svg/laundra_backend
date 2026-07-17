@@ -72,6 +72,20 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 4 failed: {e}")
 
+# Isolated migration 5
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS start_date DATE;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 5 failed: {e}")
+
+# Isolated migration 6
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS expiry_date DATE;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 6 failed: {e}")
+
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
