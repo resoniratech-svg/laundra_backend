@@ -23,6 +23,11 @@ from app.models.leave_request import LeaveRequest
 from app.models.customer_address import CustomerAddress
 from app.models.subscription_plan import SubscriptionPlan
 from app.models.customer_support_ticket import CustomerSupportTicket
+from app.models.prepaid_package import PrepaidPackage
+from app.models.customer_package import CustomerPackage
+from app.models.package_usage_history import PackageUsageHistory
+
+# This ensures all models are registered with SQLAlchemy Base
 
 __all__ = [
     "Base",
@@ -49,4 +54,7 @@ __all__ = [
     "LeaveRequest",
     "CustomerAddress",
     "SubscriptionPlan",
+    "PrepaidPackage",
+    "CustomerPackage",
+    "PackageUsageHistory"
 ]

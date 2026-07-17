@@ -3,7 +3,7 @@ from app.api.v1 import (
     auth, companies, users, customers, services, orders, payments, deliveries, expenses, coupons, reports, dashboard,
     invoices, audit_logs, saas_admin, subscriptions, support, mobile_staff, saas_plans, saas_monitoring,
     saas_reports, saas_health, saas_support, reviews, notifications, portal, leave_requests, portal_support,
-    admin_customer_support, announcements
+    admin_customer_support, announcements, prepaid_packages
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -22,6 +22,7 @@ router.include_router(payments.router, prefix="/payments", tags=["Payments"])
 router.include_router(deliveries.router, prefix="/deliveries", tags=["Deliveries"])
 router.include_router(expenses.router, prefix="/expenses", tags=["Expenses"])
 router.include_router(coupons.router, prefix="/coupons", tags=["Coupons"])
+router.include_router(prepaid_packages.router, prefix="/prepaid-packages", tags=["Prepaid Packages"])
 router.include_router(reports.router, prefix="/reports", tags=["Reports"])
 router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 router.include_router(invoices.router, prefix="/invoices", tags=["Invoices"])
