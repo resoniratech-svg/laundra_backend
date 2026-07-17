@@ -9,6 +9,7 @@ class CouponBase(BaseModel):
     discount_type: Optional[str] = None  # PERCENTAGE | FLAT
     value: Optional[Decimal] = None
     expiry_date: Optional[date] = None
+    required_services: Optional[list] = None
 
 class CouponCreate(CouponBase):
     code: str

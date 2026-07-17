@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, String, Numeric, Date
+from sqlalchemy import ForeignKey, String, Numeric, Date, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import BaseModel
@@ -14,6 +14,7 @@ class Coupon(BaseModel):
     discount_type: Mapped[Optional[str]] = mapped_column(String(20))
     value: Mapped[Decimal] = mapped_column(Numeric)
     expiry_date: Mapped[Optional[date]] = mapped_column(Date)
+    required_services: Mapped[Optional[dict]] = mapped_column(JSON)
 
     # Relationships
     company: Mapped["Company"] = relationship("Company", back_populates="coupons")

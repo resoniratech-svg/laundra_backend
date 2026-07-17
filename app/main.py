@@ -48,6 +48,10 @@ try:
         conn.execute(text("ALTER TABLE audit_logs ALTER COLUMN tenant_id DROP NOT NULL;"))
         conn.execute(text("DELETE FROM services WHERE name LIKE '%dtype: object%';"))
         conn.execute(text("DELETE FROM services a USING services b WHERE a.id < b.id AND a.name = b.name AND a.category = b.category AND a.tenant_id = b.tenant_id;"))
+        try:
+            conn.execute(text("ALTER TABLE coupons ADD COLUMN required_services JSON;"))
+        except Exception:
+            pass # Column already exists
 except Exception as e:
     print(f"[STARTUP WARNING] Failed database startup migrations or cleanups: {e}")
 
