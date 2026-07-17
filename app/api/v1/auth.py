@@ -75,12 +75,10 @@ def delivery_boy_send_otp(
     print(f"[OTP DEBUG] Generated delivery-boy registration OTP for {payload.email}: {otp}")
     
     email_sent = send_otp_email(db, payload.email, otp)
-    response = {
-        "message": f"OTP generated for {payload.email}",
-        "otp_debug": otp
-    }
+    response = {"message": f"OTP sent successfully to {payload.email}"}
     if not email_sent:
         response["warning"] = "Platform SMTP not configured. Contact Super Admin."
+        response["otp_debug"] = otp
     return response
 
 class VerifyOTPRequest(BaseModel):
@@ -188,12 +186,10 @@ def cashier_send_otp(
     print(f"[OTP DEBUG] Generated cashier registration OTP for {payload.email}: {otp}")
     
     email_sent = send_otp_email(db, payload.email, otp)
-    response = {
-        "message": f"OTP generated for {payload.email}",
-        "otp_debug": otp
-    }
+    response = {"message": f"OTP sent successfully to {payload.email}"}
     if not email_sent:
         response["warning"] = "Platform SMTP not configured. Contact Super Admin."
+        response["otp_debug"] = otp
     return response
 
 @router.post("/cashier/register", status_code=status.HTTP_201_CREATED)
