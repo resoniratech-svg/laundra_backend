@@ -5,6 +5,7 @@ from uuid import UUID
 from datetime import date, datetime
 
 class CouponBase(BaseModel):
+    name: Optional[str] = None
     code: Optional[str] = None
     discount_type: Optional[str] = None  # PERCENTAGE | FLAT
     value: Optional[Decimal] = None
@@ -13,6 +14,7 @@ class CouponBase(BaseModel):
     required_services: Optional[list] = None
 
 class CouponCreate(CouponBase):
+    name: str
     code: str
     discount_type: str
     value: Decimal

@@ -10,6 +10,7 @@ class Coupon(BaseModel):
     __tablename__ = "coupons"
 
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String(100))
     code: Mapped[Optional[str]] = mapped_column(String(50))
     discount_type: Mapped[Optional[str]] = mapped_column(String(20))
     value: Mapped[Decimal] = mapped_column(Numeric)
