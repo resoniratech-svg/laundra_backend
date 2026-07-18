@@ -136,18 +136,26 @@ def purchase_package(
         
     final_price = float(pkg.offer_price)
     if payload.coupon_code:
+        import datetime as dt
+        today = dt.date.today()
         coupon = db.query(Coupon).filter(
             Coupon.code == payload.coupon_code,
-            Coupon.tenant_id == current_user.tenant_id,
-            Coupon.status == "Active"
+            Coupon.tenant_id == current_user.tenant_id
         ).first()
         if coupon:
-            if coupon.min_purchase and final_price < float(coupon.min_purchase):
-                raise HTTPException(status_code=400, detail=f"Coupon requires min purchase of {coupon.min_purchase}")
-            if coupon.discount_amount:
-                final_price -= float(coupon.discount_amount)
-            elif coupon.discount_percent:
-                final_price -= final_price * (float(coupon.discount_percent) / 100)
+            if coupon.expiry_date and coupon.expiry_date < today:
+                raise HTTPException(status_code=400, detail="Coupon has expired")
+            if coupon.start_date and coupon.start_date > today:
+                raise HTTPException(status_code=400, detail="Coupon is not active yet")
+            
+            val = float(coupon.value)
+            if coupon.discount_type == "PERCENTAGE":
+                discount = final_price * (val / 100.0)
+            elif coupon.discount_type == "FLAT":
+                discount = val
+            else:
+                discount = 0.0
+            final_price = max(0.0, final_price - discount)
     
     # Generate mock wallet passes
     mock_customer_pkg = CustomerPackage(id=uuid.uuid4())
