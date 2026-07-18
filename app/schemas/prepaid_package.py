@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any
 from decimal import Decimal
 from datetime import date, datetime
 import uuid
@@ -11,7 +11,7 @@ class PrepaidPackageBase(BaseModel):
     original_price: Decimal
     offer_price: Decimal
     total_quantity: int
-    eligible_services: List[str]
+    eligible_services: List[Any]
     validity_days: Optional[int] = None
     start_date: Optional[date] = None
     expiry_date: Optional[date] = None
@@ -32,6 +32,7 @@ class CustomerPackageBase(BaseModel):
     
 class CustomerPackageCreate(CustomerPackageBase):
     customer_id: uuid.UUID
+    coupon_code: Optional[str] = None
 
 class CustomerPackageResponse(CustomerPackageBase):
     id: uuid.UUID
@@ -40,10 +41,16 @@ class CustomerPackageResponse(CustomerPackageBase):
     purchase_date: datetime
     activation_date: Optional[datetime] = None
     expiry_date: Optional[datetime] = None
-    total_quantity: int
+    total_quantity: Optional[int] = None
     used_quantity: int
+    package_value: float
+    current_balance: float
+    used_amount: float
     status: str
     secure_token: str
+    apple_wallet_url: Optional[str] = None
+    google_wallet_url: Optional[str] = None
+    pass_color: str
     package: Optional[PrepaidPackageResponse] = None
 
     class Config:

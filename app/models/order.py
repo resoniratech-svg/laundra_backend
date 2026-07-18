@@ -26,6 +26,8 @@ class Order(BaseModel):
     special_instructions: Mapped[Optional[str]] = mapped_column(Text)
     is_express: Mapped[bool] = mapped_column(Boolean, default=False)
     
+    applied_package_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("customer_packages.id"), nullable=True)
+    
     rating: Mapped[Optional[int]]
     review: Mapped[Optional[str]] = mapped_column(String(1000))
     review_reply: Mapped[Optional[str]] = mapped_column(String(1000))

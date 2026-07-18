@@ -16,6 +16,11 @@ class Customer(BaseModel):
     wallet_balance: Mapped[Decimal] = mapped_column(Numeric, default=0.0)
     loyalty_points: Mapped[int] = mapped_column(Integer, default=0)
     
+    gender: Mapped[Optional[str]] = mapped_column(String(20))
+    dob: Mapped[Optional[str]] = mapped_column(String(50))
+    gst_number: Mapped[Optional[str]] = mapped_column(String(50))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    
     referral_code: Mapped[Optional[str]] = mapped_column(String(50))
     referred_by_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("customers.id", ondelete="SET NULL"))
     

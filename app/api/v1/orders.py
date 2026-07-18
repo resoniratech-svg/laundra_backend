@@ -41,7 +41,8 @@ def create_order(
         items_in=order_in.items,
         coupon_code=order_in.coupon_code,
         tenant_id=current_admin.tenant_id,
-        is_express=order_in.is_express
+        is_express=order_in.is_express,
+        pay_with_package_id=order_in.pay_with_package_id
     )
 
 @router.get("", response_model=List[OrderOut])

@@ -16,6 +16,9 @@ from app.schemas.prepaid_package import (
     PackageRedeemRequest
 )
 from app.dependencies import get_current_user, get_current_admin
+from app.models.coupon import Coupon
+from app.services.wallet_service import WalletService
+from app.services.whatsapp_service import WhatsAppService
 
 router = APIRouter()
 
@@ -58,6 +61,57 @@ def list_prepaid_packages(
     ).all()
     return pkgs
 
+@router.put("/{package_id}", response_model=PrepaidPackageResponse)
+def update_prepaid_package(
+    package_id: uuid.UUID,
+    payload: PrepaidPackageCreate,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """Admin updates an existing prepaid package"""
+    pkg = db.query(PrepaidPackage).filter(
+        PrepaidPackage.id == package_id,
+        PrepaidPackage.tenant_id == current_admin.tenant_id
+    ).first()
+    
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Package not found")
+        
+    pkg.name = payload.name
+    pkg.code = payload.code
+    pkg.description = payload.description
+    pkg.original_price = payload.original_price
+    pkg.offer_price = payload.offer_price
+    pkg.total_quantity = payload.total_quantity
+    pkg.eligible_services = payload.eligible_services
+    pkg.validity_days = payload.validity_days
+    pkg.start_date = payload.start_date
+    pkg.expiry_date = payload.expiry_date
+    pkg.is_active = payload.is_active
+    
+    db.commit()
+    db.refresh(pkg)
+    return pkg
+
+@router.delete("/{package_id}")
+def delete_prepaid_package(
+    package_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """Admin deletes (or deactivates) a prepaid package"""
+    pkg = db.query(PrepaidPackage).filter(
+        PrepaidPackage.id == package_id,
+        PrepaidPackage.tenant_id == current_admin.tenant_id
+    ).first()
+    
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Package not found")
+        
+    pkg.is_active = False # soft delete
+    db.commit()
+    return {"message": "Package deleted successfully"}
+
 @router.post("/purchase", response_model=CustomerPackageResponse, status_code=201)
 def purchase_package(
     payload: CustomerPackageCreate,
@@ -80,7 +134,28 @@ def purchase_package(
     elif pkg.expiry_date:
         expiry_date = datetime.datetime.combine(pkg.expiry_date, datetime.time.max)
         
+    final_price = float(pkg.offer_price)
+    if payload.coupon_code:
+        coupon = db.query(Coupon).filter(
+            Coupon.code == payload.coupon_code,
+            Coupon.tenant_id == current_user.tenant_id,
+            Coupon.status == "Active"
+        ).first()
+        if coupon:
+            if coupon.min_purchase and final_price < float(coupon.min_purchase):
+                raise HTTPException(status_code=400, detail=f"Coupon requires min purchase of {coupon.min_purchase}")
+            if coupon.discount_amount:
+                final_price -= float(coupon.discount_amount)
+            elif coupon.discount_percent:
+                final_price -= final_price * (float(coupon.discount_percent) / 100)
+    
+    # Generate mock wallet passes
+    mock_customer_pkg = CustomerPackage(id=uuid.uuid4())
+    apple_url = WalletService.generate_apple_wallet_link(mock_customer_pkg)
+    google_url = WalletService.generate_google_wallet_link(mock_customer_pkg)
+
     customer_pkg = CustomerPackage(
+        id=mock_customer_pkg.id,
         tenant_id=current_user.tenant_id,
         customer_id=payload.customer_id,
         package_id=pkg.id,
@@ -89,11 +164,24 @@ def purchase_package(
         expiry_date=expiry_date,
         total_quantity=pkg.total_quantity,
         used_quantity=0,
+        package_value=float(pkg.offer_price),
+        current_balance=float(pkg.offer_price),
+        used_amount=0.0,
+        apple_wallet_url=apple_url,
+        google_wallet_url=google_url,
+        pass_color="GOLD",
         status="ACTIVE"
     )
     db.add(customer_pkg)
     db.commit()
     db.refresh(customer_pkg)
+    
+    customer_pkg = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(CustomerPackage.id == customer_pkg.id).first()
+    
+    customer = db.query(User).filter(User.id == payload.customer_id).first()
+    if customer:
+        WhatsAppService.send_package_activated_message(customer, customer_pkg)
+        
     
     # Reload with package relationship populated for response
     customer_pkg = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(CustomerPackage.id == customer_pkg.id).first()

@@ -11,6 +11,8 @@ from app.models.order_item import OrderItem
 from app.models.customer import Customer
 from app.models.service import Service
 from app.models.coupon import Coupon
+from app.models.customer_package import CustomerPackage
+from app.services.wallet_service import WalletService
 from app.core.tenant import get_current_tenant_id
 
 class OrderService:
@@ -26,7 +28,8 @@ class OrderService:
         items_in: list,
         coupon_code: str = None,
         tenant_id: UUID = None,
-        is_express: bool = False
+        is_express: bool = False,
+        pay_with_package_id: UUID = None
     ) -> Order:
         if not tenant_id:
             tenant_id = get_current_tenant_id()
@@ -118,10 +121,41 @@ class OrderService:
             paid_amount=Decimal("0.0"),
             payment_status="UNPAID",
             qr_code=f"https://laundrysaas.com/orders/{order_id}/qr",
-            is_express=is_express
+            is_express=is_express,
+            applied_package_id=pay_with_package_id
         )
         db.add(order)
         db.flush()
+
+        # Deduct from Prepaid Package Wallet if selected
+        if pay_with_package_id:
+            pkg = db.query(CustomerPackage).filter(
+                CustomerPackage.id == pay_with_package_id,
+                CustomerPackage.customer_id == customer_id,
+                CustomerPackage.tenant_id == tenant_id
+            ).first()
+            if not pkg:
+                raise HTTPException(status_code=404, detail="Selected prepaid package not found")
+            if pkg.current_balance < final_amount:
+                raise HTTPException(status_code=400, detail="Insufficient balance in prepaid package")
+            
+            pkg.current_balance = float(Decimal(str(pkg.current_balance)) - final_amount)
+            pkg.used_amount = float(Decimal(str(pkg.used_amount)) + final_amount)
+            pkg.pass_color = WalletService.update_pass_color(pkg)
+            if pkg.current_balance <= 0:
+                pkg.status = "COMPLETED"
+            else:
+                pkg.status = "IN_USE"
+                
+            order.paid_amount = final_amount
+            order.payment_status = "PAID"
+            
+            # Here we would normally trigger a background task to update Google/Apple Wallet API
+            # Since this is a mock architecture, we just log it.
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"WALLET UPDATED: Card color is now {pkg.pass_color} with balance {pkg.current_balance}")
+
 
         # 5. Save items
         for order_item in items_to_create:

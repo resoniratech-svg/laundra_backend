@@ -26,6 +26,7 @@ class OrderCreate(OrderBase):
     items: List[OrderItemCreate]
     coupon_code: Optional[str] = None
     is_express: bool = False
+    pay_with_package_id: Optional[UUID] = None
 
 class OrderOut(OrderBase):
     id: UUID
