@@ -116,6 +116,21 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 9 failed: {e}")
 
+# Isolated migration 10 – fix orphaned customers (create missing User records)
+try:
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO users (id, tenant_id, name, phone, email, password, role, status, created_at, updated_at)
+            SELECT c.id, c.tenant_id, c.name, c.phone, c.email, 
+                   '$2b$12$Z0tT0LzE8d1L7w6w6w6w6uxX5Y3gZ3tT0LzE8d1L7w6w6w6w6w6w6', -- placeholder
+                   'CUSTOMER', 'ACTIVE', NOW(), NOW()
+            FROM customers c
+            LEFT JOIN users u ON c.id = u.id
+            WHERE u.id IS NULL;
+        """))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 10 failed: {e}")
+
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,

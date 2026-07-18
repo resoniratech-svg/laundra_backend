@@ -130,19 +130,18 @@ def create_customer(
     user_id = uuid4()
     from app.core.security import get_password_hash
     
-    # Create the User record (only if email is provided, since email is used for login)
-    if customer_in.email:
-        new_user = User(
-            id=user_id,
-            tenant_id=current_admin.tenant_id,
-            name=customer_in.name,
-            phone=customer_in.phone,
-            email=customer_in.email,
-            password=get_password_hash(customer_in.password or "customer123"),
-            role="CUSTOMER",
-            status="ACTIVE"
-        )
-        db.add(new_user)
+    # Create the User record
+    new_user = User(
+        id=user_id,
+        tenant_id=current_admin.tenant_id,
+        name=customer_in.name,
+        phone=customer_in.phone,
+        email=customer_in.email,
+        password=get_password_hash(customer_in.password or "customer123"),
+        role="CUSTOMER",
+        status="ACTIVE"
+    )
+    db.add(new_user)
     
     import uuid
     # Create the Customer record
