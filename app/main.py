@@ -86,6 +86,36 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 6 failed: {e}")
 
+# Isolated migration 7 – customer extra fields
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS gender VARCHAR(20);"))
+        conn.execute(text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS dob VARCHAR(50);"))
+        conn.execute(text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS gst_number VARCHAR(50);"))
+        conn.execute(text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS notes TEXT;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 7 failed: {e}")
+
+# Isolated migration 8 – customer_packages wallet fields
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS package_value NUMERIC DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS current_balance NUMERIC DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS used_amount NUMERIC DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS apple_wallet_url VARCHAR(500);"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS google_wallet_url VARCHAR(500);"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS pass_color VARCHAR(50);"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'ACTIVE';"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 8 failed: {e}")
+
+# Isolated migration 9 – prepaid_packages extra fields
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE prepaid_packages ADD COLUMN IF NOT EXISTS code VARCHAR(100);"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 9 failed: {e}")
+
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
