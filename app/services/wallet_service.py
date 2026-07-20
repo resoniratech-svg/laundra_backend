@@ -32,7 +32,7 @@ class WalletService:
         Orange = Low Balance (< 10%)
         White = Completed / Empty
         """
-        if package.current_balance <= 0:
+        if package.current_balance <= 0 or package.status in ['COMPLETED', 'FULLY_UTILIZED', 'EXPIRED']:
             return "WHITE"
         
         if package.package_value and package.package_value > 0:
