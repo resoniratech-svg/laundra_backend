@@ -15,3 +15,11 @@ htmlcov/
 # Google Wallet
 secrets/
 *.json
+
+# Apple Wallet
+certificates/apple_wallet/*.p12
+certificates/apple_wallet/*.certSigningRequest
+generated/apple_wallet/pkpass/*
+generated/apple_wallet/qr/*
+wallet-api-temp/
+

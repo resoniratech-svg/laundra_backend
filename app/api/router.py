@@ -3,7 +3,7 @@ from app.api.v1 import (
     auth, companies, users, customers, services, orders, payments, deliveries, expenses, coupons, reports, dashboard,
     invoices, audit_logs, saas_admin, subscriptions, support, mobile_staff, saas_plans, saas_monitoring,
     saas_reports, saas_health, saas_support, reviews, notifications, portal, leave_requests, portal_support,
-    admin_customer_support, announcements, prepaid_packages, wallet
+    admin_customer_support, announcements, prepaid_packages, wallet, apple_wallet
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -40,4 +40,6 @@ router.include_router(reviews.router, prefix="/reviews", tags=["Reviews"])
 router.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
 router.include_router(portal.router, prefix="/portal", tags=["Customer Portal"])
 router.include_router(wallet.router, prefix="", tags=["Google Wallet"])
+router.include_router(apple_wallet.router, prefix="", tags=["Apple Wallet"])
+
 

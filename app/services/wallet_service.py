@@ -59,9 +59,27 @@ class WalletService:
         """
         cust_name = customer.name if customer else "Customer"
         google_url = WalletService.generate_google_wallet_link(package, customer_name=cust_name, company_name=company_name)
-        
         package.google_wallet_url = google_url
         
+        # Generate Apple Wallet Pass URL
+        try:
+            pkg_title = package.package.name if hasattr(package, 'package') and package.package else "Prepaid Package"
+            exp_str = package.expiry_date.strftime('%Y-%m-%d') if package.expiry_date else "N/A"
+            bal_str = f"QR {float(package.current_balance or package.package_value or 0.0):.2f}"
+            apple_res = WalletService.generate_real_apple_wallet_pass(
+                db=db,
+                tenant_id=package.tenant_id,
+                customer_id=package.customer_id,
+                customer_name=cust_name,
+                package_name=pkg_title,
+                remaining_balance=bal_str,
+                expiry_date=exp_str
+            )
+            if apple_res and apple_res.get("download_url"):
+                package.apple_wallet_url = apple_res["download_url"]
+        except Exception as apple_err:
+            logger.error(f"Error generating Apple Wallet pass for package {package.id}: {apple_err}")
+
         issuer_id = settings.GOOGLE_WALLET_ISSUER_ID
         clean_id = str(package.id).replace("-", "")
         object_id = f"{issuer_id}.customer_{clean_id}"
@@ -125,6 +143,60 @@ class WalletService:
         return f"https://wallet.apple.com/add/pass/mock_{mock_id}"
 
     @staticmethod
+    def generate_real_apple_wallet_pass(
+        db: Session,
+        tenant_id: uuid.UUID,
+        customer_id: uuid.UUID,
+        customer_name: str,
+        package_name: str,
+        remaining_balance: str,
+        expiry_date: Optional[str] = None,
+        order_id: Optional[uuid.UUID] = None
+    ) -> dict:
+        from app.services.apple_wallet.pass_service import PassService
+        from app.schemas.apple_wallet import LaundryPassData
+        from app.models.wallet_pass import WalletPass
+
+        serial_number = f"PASS-{uuid.uuid4().hex[:8].upper()}"
+        auth_token = uuid.uuid4().hex
+        qr_token = f"https://laundry.example.com/verify/pass/{serial_number}?token={auth_token}"
+
+        pass_data = LaundryPassData(
+            customer_name=customer_name,
+            package_name=package_name,
+            package_id=str(order_id or serial_number),
+            remaining_balance=remaining_balance,
+            expiry_date=expiry_date or "N/A",
+            qr_data=qr_token
+        )
+
+        pass_service = PassService()
+        pkpass_path = pass_service.generate_pkpass(pass_data, serial_number=serial_number)
+
+        wallet_pass = WalletPass(
+            tenant_id=tenant_id,
+            customer_id=customer_id,
+            order_id=order_id,
+            pass_type_identifier=settings.APPLE_WALLET_PASS_TYPE_IDENTIFIER,
+            serial_number=serial_number,
+            authentication_token=auth_token,
+            qr_token=qr_token,
+            status="ACTIVE",
+            pass_file_path=str(pkpass_path)
+        )
+        db.add(wallet_pass)
+        db.commit()
+        db.refresh(wallet_pass)
+
+        return {
+            "success": True,
+            "pass_id": wallet_pass.id,
+            "serial_number": serial_number,
+            "download_url": f"/api/v1/wallet/apple/pass/{wallet_pass.id}",
+            "file_path": str(pkpass_path)
+        }
+
+    @staticmethod
     def update_pass_color(package: CustomerPackage) -> str:
         if package.current_balance <= 0 or package.status in ['COMPLETED', 'FULLY_UTILIZED', 'EXPIRED']:
             return "WHITE"
@@ -137,3 +209,4 @@ class WalletService:
                 return "GREY"
                 
         return "GOLD"
+

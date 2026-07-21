@@ -1,44 +1,30 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
-import uuid
-import datetime
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from app.models.base import BaseModel
+from typing import Optional
+import enum
 
-from app.models.base import Base
-from app.core.config import settings
+class WalletPassStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    EXPIRED = "EXPIRED"
+    REVOKED = "REVOKED"
 
-class WalletPass(Base):
+class WalletPass(BaseModel):
     __tablename__ = "wallet_passes"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    company_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("companies.id"), nullable=True)
-    customer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
-    customer_package_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("customer_packages.id"), nullable=False)
-    
-    class_id: Mapped[str] = mapped_column(String(150), nullable=True, default=lambda: settings.GOOGLE_WALLET_CLASS_ID)
-    wallet_object_id: Mapped[str] = mapped_column(String(150), unique=True, nullable=False)
-    wallet_url: Mapped[str] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
-    
-    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=datetime.datetime.utcnow)
-    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    customer_id: Mapped[UUID] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True)
+    order_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True)
 
-    @property
-    def object_id(self):
-        return self.wallet_object_id
+    pass_type_identifier: Mapped[str] = mapped_column(String(255), nullable=False)
+    serial_number: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    authentication_token: Mapped[str] = mapped_column(String(255), nullable=False)
+    qr_token: Mapped[str] = mapped_column(String(500), nullable=False)
 
-    @object_id.setter
-    def object_id(self, value):
-        self.wallet_object_id = value
+    status: Mapped[str] = mapped_column(String(50), default="ACTIVE")
+    pass_file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
-    @property
-    def pass_status(self):
-        return self.status
-
-    @pass_status.setter
-    def pass_status(self, value):
-        self.status = value
-
-    company = relationship("Company")
-    customer = relationship("User", foreign_keys=[customer_id])
-    customer_package = relationship("CustomerPackage")
+    # Relationships
+    company: Mapped["Company"] = relationship("Company")
+    customer: Mapped["Customer"] = relationship("Customer")
