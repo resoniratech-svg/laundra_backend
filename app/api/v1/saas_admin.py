@@ -308,6 +308,36 @@ def hard_delete_company(
     except Exception:
         pass
 
+    try:
+        from app.models.package_usage_history import PackageUsageHistory
+        db.query(PackageUsageHistory).filter(PackageUsageHistory.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.wallet_pass import WalletPass
+        db.query(WalletPass).filter(WalletPass.company_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.customer_package import CustomerPackage
+        db.query(CustomerPackage).filter(CustomerPackage.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.prepaid_package import PrepaidPackage
+        db.query(PrepaidPackage).filter(PrepaidPackage.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        from app.models.audit_log import AuditLog
+        db.query(AuditLog).filter(AuditLog.tenant_id == id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
     # Delete all users (admins, cashiers, delivery staff) belonging to this company
     db.query(User).filter(User.tenant_id == id).delete(synchronize_session=False)
 

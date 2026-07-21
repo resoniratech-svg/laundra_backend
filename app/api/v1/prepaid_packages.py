@@ -17,10 +17,54 @@ from app.schemas.prepaid_package import (
 )
 from app.dependencies import get_current_user, get_current_admin
 from app.models.coupon import Coupon
+from app.models.wallet_pass import WalletPass
+from app.models.payment import Payment
 from app.services.wallet_service import WalletService
 from app.services.whatsapp_service import WhatsAppService
+from app.wallet.object_manager import build_wallet_object_payload, generate_google_wallet_save_url
 
 router = APIRouter()
+
+@router.get("/customer/{customer_id}")
+def get_customer_packages(
+    customer_id: uuid.UUID,
+    db: Session = Depends(get_db)
+):
+    """Fetch all active packages for a customer with Google Wallet URL"""
+    customer = db.query(User).filter(User.id == customer_id).first()
+    pkgs = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
+        CustomerPackage.customer_id == customer_id,
+        CustomerPackage.status == "ACTIVE"
+    ).all()
+    
+    result = []
+    for p in pkgs:
+        g_url = p.google_wallet_url
+        if not g_url and customer:
+            try:
+                g_url = WalletService.create_and_save_wallet_pass(
+                    db=db,
+                    package=p,
+                    customer=customer,
+                    company_name="Laundra Laundry"
+                )
+            except Exception as e:
+                print(f"Could not generate wallet pass on the fly: {e}")
+
+        result.append({
+            "id": str(p.id),
+            "customer_id": str(p.customer_id),
+            "package_id": str(p.package_id),
+            "package_name": p.package.name if p.package else "Prepaid Package",
+            "current_balance": float(p.current_balance or p.package_value or 0.0),
+            "used_quantity": p.used_quantity,
+            "total_quantity": p.total_quantity,
+            "status": p.status,
+            "google_wallet_url": g_url or "",
+            "apple_wallet_url": p.apple_wallet_url or "",
+            "expiry_date": p.expiry_date.isoformat() if p.expiry_date else None
+        })
+    return result
 
 @router.post("/", response_model=PrepaidPackageResponse, status_code=201)
 def create_prepaid_package(
@@ -157,13 +201,9 @@ def purchase_package(
                 discount = 0.0
             final_price = max(0.0, final_price - discount)
     
-    # Generate mock wallet passes
-    mock_customer_pkg = CustomerPackage(id=uuid.uuid4())
-    apple_url = WalletService.generate_apple_wallet_link(mock_customer_pkg)
-    google_url = WalletService.generate_google_wallet_link(mock_customer_pkg)
-
+    # 1. Save CustomerPackage Purchase
     customer_pkg = CustomerPackage(
-        id=mock_customer_pkg.id,
+        id=uuid.uuid4(),
         tenant_id=current_user.tenant_id,
         customer_id=payload.customer_id,
         package_id=pkg.id,
@@ -175,8 +215,6 @@ def purchase_package(
         package_value=float(pkg.offer_price),
         current_balance=float(pkg.offer_price),
         used_amount=0.0,
-        apple_wallet_url=apple_url,
-        google_wallet_url=google_url,
         pass_color="GOLD",
         status="ACTIVE"
     )
@@ -185,14 +223,21 @@ def purchase_package(
     db.refresh(customer_pkg)
     
     customer_pkg = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(CustomerPackage.id == customer_pkg.id).first()
-    
     customer = db.query(User).filter(User.id == payload.customer_id).first()
+    company_name = getattr(current_user, 'company', None).name if getattr(current_user, 'company', None) else "Laundra Laundry"
+
+    # 2. Orchestrate Google Wallet Object Creation, Signed JWT URL & DB Persistence
+    WalletService.create_and_save_wallet_pass(
+        db=db,
+        package=customer_pkg,
+        customer=customer,
+        company_name=company_name
+    )
+
+    # 3. Trigger WhatsApp Notification with Google Wallet Pass Link
     if customer:
         WhatsAppService.send_package_activated_message(customer, customer_pkg)
         
-    
-    # Reload with package relationship populated for response
-    customer_pkg = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(CustomerPackage.id == customer_pkg.id).first()
     return customer_pkg
 
 @router.get("/customer/{customer_id}", response_model=List[CustomerPackageResponse])
@@ -316,5 +361,9 @@ def redeem_package_quantity(
     )
     db.add(history)
     db.commit()
+
+    # Step 8: Update Google Wallet Object pass balance & status
+    customer = db.query(User).filter(User.id == pkg.customer_id).first()
+    WalletService.update_wallet_pass_on_usage(db, pkg, customer)
     
     return {"success": True, "message": f"Successfully redeemed {payload.quantity_used} items.", "remaining": pkg.total_quantity - pkg.used_quantity}

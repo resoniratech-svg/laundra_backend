@@ -126,10 +126,20 @@ try:
                    'CUSTOMER', 'ACTIVE', NOW(), NOW()
             FROM customers c
             LEFT JOIN users u ON c.id = u.id
-            WHERE u.id IS NULL;
         """))
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 10 failed: {e}")
+
+# Isolated migration 11 – wallet_passes table extra columns & customer_packages URL text expansion
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS class_id VARCHAR(150);"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS pass_status VARCHAR(20) DEFAULT 'ACTIVE';"))
+        conn.execute(text("ALTER TABLE customer_packages ALTER COLUMN google_wallet_url TYPE TEXT;"))
+        conn.execute(text("ALTER TABLE customer_packages ALTER COLUMN apple_wallet_url TYPE TEXT;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 11 failed: {e}")
+
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -158,6 +168,14 @@ app.add_middleware(LoggingMiddleware)
 app.add_middleware(TenantMiddleware)
 
 app.include_router(router)
+
+# Initialize Google Wallet Generic Class on Application Startup
+try:
+    from app.wallet.class_service import create_or_get_generic_class
+    wallet_res = create_or_get_generic_class()
+    print(f"[GOOGLE WALLET STARTUP] {wallet_res.get('message', 'Generic Class verified')}")
+except Exception as gw_e:
+    print(f"[GOOGLE WALLET STARTUP WARNING] Could not verify Generic Class on startup: {gw_e}")
 
 @app.get("/")
 def home():

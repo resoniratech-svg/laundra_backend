@@ -37,6 +37,8 @@ class OrderOut(OrderBase):
     discount: Decimal
     paid_amount: Decimal
     payment_status: str
+    package_name: Optional[str] = None
+    applied_package_id: Optional[UUID] = None
     qr_code: Optional[str] = None
     rating: Optional[int] = None
     review: Optional[str] = None

@@ -4,7 +4,7 @@ from sqlalchemy import desc
 from typing import List
 from uuid import UUID
 from pydantic import BaseModel
-from datetime import date
+from datetime import date, datetime
 
 from app.core.database import get_db
 from app.dependencies import get_current_admin
@@ -22,6 +22,7 @@ class LeaveRequestOut(BaseModel):
     reason: str
     status: str
     admin_comment: str | None = None
+    updated_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -53,7 +54,8 @@ def get_leave_requests(
             end_date=lr.end_date,
             reason=lr.reason,
             status=lr.status,
-            admin_comment=lr.admin_comment
+            admin_comment=lr.admin_comment,
+            updated_at=lr.updated_at
         ))
     
     return result
