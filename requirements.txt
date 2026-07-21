@@ -17,3 +17,5 @@ pandas==2.2.2
 google-auth
 google-api-python-client
 pyjwt
+Pillow==10.3.0  
+ 
