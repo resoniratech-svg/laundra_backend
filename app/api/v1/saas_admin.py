@@ -217,61 +217,64 @@ def hard_delete_company(
         from app.models.prepaid_package import PrepaidPackage
         from app.models.audit_log import AuditLog
 
-        # Reviews
+        # Get order IDs first for child table cleanup
+        order_ids = [o.id for o in db.query(Order.id).filter(Order.tenant_id == id).all()]
+
+        # 1. Reviews (SET NULL on order_id, safe first)
         db.query(Review).filter(Review.tenant_id == id).delete(synchronize_session=False)
 
-        # Support tickets
+        # 2. Support tickets
         db.query(CustomerSupportTicket).filter(CustomerSupportTicket.tenant_id == id).delete(synchronize_session=False)
         db.query(SupportTicket).filter(SupportTicket.tenant_id == id).delete(synchronize_session=False)
 
-        # Payments
+        # 3. ALL FK children of orders must be deleted BEFORE orders:
+        #    - payments.order_id → orders.id
+        #    - deliveries.order_id → orders.id
+        #    - order_items.order_id → orders.id
+        #    - invoices.order_id → orders.id (CASCADE, but explicit for clarity)
+        #    - package_usage_history.order_id → orders.id
         db.query(Payment).filter(Payment.tenant_id == id).delete(synchronize_session=False)
-
-        # Order items then orders
-        order_ids = [o.id for o in db.query(Order.id).filter(Order.tenant_id == id).all()]
+        db.query(Delivery).filter(Delivery.tenant_id == id).delete(synchronize_session=False)
         if order_ids:
             db.query(OrderItem).filter(OrderItem.order_id.in_(order_ids)).delete(synchronize_session=False)
+        db.query(Invoice).filter(Invoice.tenant_id == id).delete(synchronize_session=False)
+        db.query(PackageUsageHistory).filter(PackageUsageHistory.tenant_id == id).delete(synchronize_session=False)
+
+        # 4. Now safe to delete orders
         db.query(Order).filter(Order.tenant_id == id).delete(synchronize_session=False)
 
-        # Deliveries
-        db.query(Delivery).filter(Delivery.tenant_id == id).delete(synchronize_session=False)
-
-        # Invoices
-        db.query(Invoice).filter(Invoice.tenant_id == id).delete(synchronize_session=False)
-
-        # Expenses
+        # 5. Expenses
         db.query(Expense).filter(Expense.tenant_id == id).delete(synchronize_session=False)
 
-        # Coupons
+        # 6. Coupons
         db.query(Coupon).filter(Coupon.tenant_id == id).delete(synchronize_session=False)
 
-        # Announcements
+        # 7. Announcements
         db.query(Announcement).filter(Announcement.tenant_id == id).delete(synchronize_session=False)
 
-        # Leave requests
+        # 8. Leave requests
         db.query(LeaveRequest).filter(LeaveRequest.tenant_id == id).delete(synchronize_session=False)
 
-        # Notifications
+        # 9. Notifications
         db.query(Notification).filter(Notification.tenant_id == id).delete(synchronize_session=False)
 
-        # Customer addresses then customers
+        # 10. Customer addresses then customers
         customer_ids = [c.id for c in db.query(Customer.id).filter(Customer.tenant_id == id).all()]
         if customer_ids:
             db.query(CustomerAddress).filter(CustomerAddress.customer_id.in_(customer_ids)).delete(synchronize_session=False)
         db.query(Customer).filter(Customer.tenant_id == id).delete(synchronize_session=False)
 
-        # Services
+        # 11. Services
         db.query(Service).filter(Service.tenant_id == id).delete(synchronize_session=False)
 
-        # Subscription
+        # 12. Subscription
         db.query(Subscription).filter(Subscription.tenant_id == id).delete(synchronize_session=False)
 
-        # Package usage history & customer packages & prepaid packages
-        db.query(PackageUsageHistory).filter(PackageUsageHistory.tenant_id == id).delete(synchronize_session=False)
+        # 13. Customer packages & prepaid packages
         db.query(CustomerPackage).filter(CustomerPackage.tenant_id == id).delete(synchronize_session=False)
         db.query(PrepaidPackage).filter(PrepaidPackage.tenant_id == id).delete(synchronize_session=False)
 
-        # Audit logs
+        # 14. Audit logs
         db.query(AuditLog).filter(AuditLog.tenant_id == id).delete(synchronize_session=False)
 
         # Optional models (silently ignore if table doesn't exist)
