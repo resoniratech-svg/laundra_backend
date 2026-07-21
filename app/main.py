@@ -112,6 +112,7 @@ try:
                    'CUSTOMER', 'ACTIVE', NOW(), NOW()
             FROM customers c
             LEFT JOIN users u ON c.id = u.id
+            WHERE u.id IS NULL
         """))
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 10 failed: {e}")
