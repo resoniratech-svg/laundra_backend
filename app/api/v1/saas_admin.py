@@ -91,9 +91,11 @@ def list_all_companies(
         sub = db.query(Subscription).filter(Subscription.tenant_id == c.id, Subscription.status == 'ACTIVE').first()
         customer_count = db.query(func.count(Customer.id)).filter(Customer.tenant_id == c.id).scalar() or 0
         order_count = db.query(func.count(Order.id)).filter(Order.tenant_id == c.id).scalar() or 0
+        orders_revenue = db.query(func.coalesce(func.sum(Order.total_amount), 0.0)).filter(Order.tenant_id == c.id).scalar() or 0.0
         c_dict = {col.name: getattr(c, col.name) for col in c.__table__.columns}
         c_dict['customer_count'] = customer_count
         c_dict['order_count'] = order_count
+        c_dict['orders_revenue'] = float(orders_revenue)
         if sub:
             c_dict['subscription'] = {
                 'tier': sub.plan_name,
