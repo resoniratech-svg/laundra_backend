@@ -26,7 +26,10 @@ from app.core.exceptions import (
     generic_exception_handler
 )
 
-Base.metadata.create_all(bind=engine)
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as e:
+    print(f"[STARTUP CRITICAL] Database connection or table creation failed: {e}")
 
 # Drop NOT NULL constraint on audit_logs.tenant_id for platform-level logs
 # Isolated migration 1
