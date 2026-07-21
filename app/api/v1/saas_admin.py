@@ -193,160 +193,125 @@ def hard_delete_company(
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    # Cascade delete all company data in proper dependency order
     try:
+        # Cascade delete all company data in proper dependency order within one transaction
         from app.models.review import Review
-        db.query(Review).filter(Review.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    try:
         from app.models.customer_support_ticket import CustomerSupportTicket
-        db.query(CustomerSupportTicket).filter(CustomerSupportTicket.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    try:
         from app.models.support_ticket import SupportTicket
-        db.query(SupportTicket).filter(SupportTicket.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    try:
         from app.models.payment import Payment
-        db.query(Payment).filter(Payment.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    try:
         from app.models.order_item import OrderItem
         from app.models.order import Order
+        from app.models.delivery import Delivery
+        from app.models.invoice import Invoice
+        from app.models.expense import Expense
+        from app.models.coupon import Coupon
+        from app.models.announcement import Announcement
+        from app.models.leave_request import LeaveRequest
+        from app.models.notification import Notification
+        from app.models.customer_address import CustomerAddress
+        from app.models.customer import Customer
+        from app.models.service import Service
+        from app.models.subscription import Subscription
+        from app.models.package_usage_history import PackageUsageHistory
+        from app.models.customer_package import CustomerPackage
+        from app.models.prepaid_package import PrepaidPackage
+        from app.models.audit_log import AuditLog
+
+        # Reviews
+        db.query(Review).filter(Review.tenant_id == id).delete(synchronize_session=False)
+
+        # Support tickets
+        db.query(CustomerSupportTicket).filter(CustomerSupportTicket.tenant_id == id).delete(synchronize_session=False)
+        db.query(SupportTicket).filter(SupportTicket.tenant_id == id).delete(synchronize_session=False)
+
+        # Payments
+        db.query(Payment).filter(Payment.tenant_id == id).delete(synchronize_session=False)
+
+        # Order items then orders
         order_ids = [o.id for o in db.query(Order.id).filter(Order.tenant_id == id).all()]
         if order_ids:
             db.query(OrderItem).filter(OrderItem.order_id.in_(order_ids)).delete(synchronize_session=False)
         db.query(Order).filter(Order.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
 
-    try:
-        from app.models.delivery import Delivery
+        # Deliveries
         db.query(Delivery).filter(Delivery.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
 
-    try:
-        from app.models.invoice import Invoice
+        # Invoices
         db.query(Invoice).filter(Invoice.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
 
-    try:
-        from app.models.expense import Expense
+        # Expenses
         db.query(Expense).filter(Expense.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
 
-    try:
-        from app.models.coupon import Coupon
+        # Coupons
         db.query(Coupon).filter(Coupon.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
 
-    try:
-        from app.models.announcement import Announcement
+        # Announcements
         db.query(Announcement).filter(Announcement.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
 
-    try:
-        from app.models.leave_request import LeaveRequest
+        # Leave requests
         db.query(LeaveRequest).filter(LeaveRequest.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
 
-    try:
-        from app.models.attendance import Attendance
-        db.query(Attendance).filter(Attendance.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    try:
-        from app.models.notification import Notification
+        # Notifications
         db.query(Notification).filter(Notification.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
 
-    try:
-        from app.models.customer_address import CustomerAddress
-        from app.models.customer import Customer
+        # Customer addresses then customers
         customer_ids = [c.id for c in db.query(Customer.id).filter(Customer.tenant_id == id).all()]
         if customer_ids:
             db.query(CustomerAddress).filter(CustomerAddress.customer_id.in_(customer_ids)).delete(synchronize_session=False)
         db.query(Customer).filter(Customer.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
 
-    try:
-        from app.models.service import Service
+        # Services
         db.query(Service).filter(Service.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
 
-    try:
-        from app.models.subscription import Subscription
+        # Subscription
         db.query(Subscription).filter(Subscription.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
 
-    try:
-        from app.models.company_feature import CompanyFeature
-        db.query(CompanyFeature).filter(CompanyFeature.company_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    try:
-        from app.models.platform_settings import PlatformSettings
-        db.query(PlatformSettings).filter(PlatformSettings.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    try:
-        from app.models.package_usage_history import PackageUsageHistory
+        # Package usage history & customer packages & prepaid packages
         db.query(PackageUsageHistory).filter(PackageUsageHistory.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    try:
-        from app.models.wallet_pass import WalletPass
-        db.query(WalletPass).filter(WalletPass.company_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    try:
-        from app.models.customer_package import CustomerPackage
         db.query(CustomerPackage).filter(CustomerPackage.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    try:
-        from app.models.prepaid_package import PrepaidPackage
         db.query(PrepaidPackage).filter(PrepaidPackage.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
 
-    try:
-        from app.models.audit_log import AuditLog
+        # Audit logs
         db.query(AuditLog).filter(AuditLog.tenant_id == id).delete(synchronize_session=False)
-    except Exception:
-        pass
 
-    # Delete all users (admins, cashiers, delivery staff) belonging to this company
-    db.query(User).filter(User.tenant_id == id).delete(synchronize_session=False)
+        # Optional models (silently ignore if table doesn't exist)
+        try:
+            from app.models.company_feature import CompanyFeature
+            db.query(CompanyFeature).filter(CompanyFeature.company_id == id).delete(synchronize_session=False)
+        except Exception:
+            pass  # Table may not exist; continue
 
-    # Finally delete the company itself
-    db.query(Company).filter(Company.id == id).delete(synchronize_session=False)
-    db.commit()
-    return {"message": "Company and all associated data deleted successfully"}
+        try:
+            from app.models.platform_settings import PlatformSettings
+            db.query(PlatformSettings).filter(PlatformSettings.tenant_id == id).delete(synchronize_session=False)
+        except Exception:
+            pass  # Table may not exist; continue
+
+        try:
+            from app.models.wallet_pass import WalletPass
+            db.query(WalletPass).filter(WalletPass.company_id == id).delete(synchronize_session=False)
+        except Exception:
+            pass  # Table may not exist; continue
+
+        try:
+            from app.models.attendance import Attendance
+            db.query(Attendance).filter(Attendance.tenant_id == id).delete(synchronize_session=False)
+        except Exception:
+            pass  # Table may not exist; continue
+
+        # Delete all users then the company itself
+        db.query(User).filter(User.tenant_id == id).delete(synchronize_session=False)
+        db.query(Company).filter(Company.id == id).delete(synchronize_session=False)
+
+        db.commit()
+        return {"message": "Company and all associated data deleted successfully"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete company: {str(e)}"
+        )
 
 @router.post("/companies/{id}/status")
 def update_company_status(

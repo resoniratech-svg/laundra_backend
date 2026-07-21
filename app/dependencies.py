@@ -46,14 +46,17 @@ def get_current_user(
 ) -> User:
     tenant_id = None
     tenant_header = request.headers.get("X-Tenant-ID")
-    
-    if token_data.get("tenant_id") and token_data["tenant_id"] != "None":
-        tenant_id = UUID(token_data["tenant_id"])
-    elif tenant_header:
+
+    # X-Tenant-ID header always takes precedence (used for super admin impersonation)
+    if tenant_header:
         try:
             tenant_id = UUID(tenant_header)
         except ValueError:
             pass
+
+    # Fall back to JWT tenant_id if no header override
+    if tenant_id is None and token_data.get("tenant_id") and token_data["tenant_id"] != "None":
+        tenant_id = UUID(token_data["tenant_id"])
             
     if tenant_id:
         set_current_tenant_id(tenant_id)
