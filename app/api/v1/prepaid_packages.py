@@ -25,47 +25,6 @@ from app.wallet.object_manager import build_wallet_object_payload, generate_goog
 
 router = APIRouter()
 
-@router.get("/customer/{customer_id}")
-def get_customer_packages(
-    customer_id: uuid.UUID,
-    db: Session = Depends(get_db)
-):
-    """Fetch all active packages for a customer with Google Wallet URL"""
-    customer = db.query(User).filter(User.id == customer_id).first()
-    pkgs = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
-        CustomerPackage.customer_id == customer_id,
-        CustomerPackage.status == "ACTIVE"
-    ).all()
-    
-    result = []
-    for p in pkgs:
-        g_url = p.google_wallet_url
-        if not g_url and customer:
-            try:
-                g_url = WalletService.create_and_save_wallet_pass(
-                    db=db,
-                    package=p,
-                    customer=customer,
-                    company_name="Laundra Laundry"
-                )
-            except Exception as e:
-                print(f"Could not generate wallet pass on the fly: {e}")
-
-        result.append({
-            "id": str(p.id),
-            "customer_id": str(p.customer_id),
-            "package_id": str(p.package_id),
-            "package_name": p.package.name if p.package else "Prepaid Package",
-            "current_balance": float(p.current_balance or p.package_value or 0.0),
-            "used_quantity": p.used_quantity,
-            "total_quantity": p.total_quantity,
-            "status": p.status,
-            "google_wallet_url": g_url or "",
-            "apple_wallet_url": p.apple_wallet_url or "",
-            "expiry_date": p.expiry_date.isoformat() if p.expiry_date else None
-        })
-    return result
-
 @router.post("/", response_model=PrepaidPackageResponse, status_code=201)
 def create_prepaid_package(
     payload: PrepaidPackageCreate,
@@ -156,6 +115,8 @@ def delete_prepaid_package(
     db.commit()
     return {"message": "Package deleted successfully"}
 
+from app.schemas.prepaid_package import CustomerPackageResponse, WalletGenerationStatus
+
 @router.post("/purchase", response_model=CustomerPackageResponse, status_code=201)
 def purchase_package(
     payload: CustomerPackageCreate,
@@ -227,18 +188,28 @@ def purchase_package(
     customer = db.query(User).filter(User.id == payload.customer_id).first()
     company_name = getattr(current_user, 'company', None).name if getattr(current_user, 'company', None) else "Laundra Laundry"
 
-    # 2. Orchestrate Google Wallet Object Creation, Signed JWT URL & DB Persistence
-    WalletService.create_and_save_wallet_pass(
-        db=db,
-        package=customer_pkg,
-        customer=customer,
-        company_name=company_name
-    )
+    # 2. Orchestrate Google Wallet, Apple Wallet, QR Code Creation & DB Persistence
+    wallet_status = {"google_wallet": False, "apple_wallet": False, "qr_code": False}
+    try:
+        wallet_status = WalletService.create_and_save_wallet_pass(
+            db=db,
+            package=customer_pkg,
+            customer=customer,
+            company_name=company_name
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Unexpected error in wallet orchestration for package {customer_pkg.id}: {e}")
 
-    # 3. Trigger WhatsApp Notification with Google Wallet Pass Link
+    # 3. Trigger WhatsApp Notification
     if customer:
-        WhatsAppService.send_package_activated_message(customer, customer_pkg)
+        try:
+            WhatsAppService.send_package_activated_message(customer, customer_pkg)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to send WhatsApp notification for package {customer_pkg.id}: {e}")
         
+    setattr(customer_pkg, "wallet_generation", wallet_status)
     return customer_pkg
 
 @router.get("/customer/{customer_id}", response_model=List[CustomerPackageResponse])

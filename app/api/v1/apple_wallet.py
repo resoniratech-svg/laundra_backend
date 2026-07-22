@@ -55,20 +55,22 @@ def generate_apple_pass(
             detail=f"Failed to generate Apple Wallet pass: {str(e)}"
         )
 
-@router.get("/pass/{pass_id}")
+@router.get("/pass/{secure_token}")
 def download_apple_pass(
-    pass_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    secure_token: str,
+    db: Session = Depends(get_db)
 ):
     """
     Downloads the generated .pkpass file.
-    Enforces tenant access check.
+    Publicly accessible via secure_token.
     """
-    pass_rec = db.query(WalletPass).filter(
-        WalletPass.id == pass_id,
-        WalletPass.tenant_id == current_user.tenant_id
-    ).first()
+    from app.models.customer_package import CustomerPackage
+    
+    package = db.query(CustomerPackage).filter(CustomerPackage.secure_token == secure_token).first()
+    if not package:
+        raise HTTPException(status_code=404, detail="Apple Wallet pass not found")
+
+    pass_rec = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
 
     if not pass_rec or not pass_rec.pass_file_path:
         raise HTTPException(status_code=404, detail="Apple Wallet pass not found")
@@ -80,7 +82,7 @@ def download_apple_pass(
     return FileResponse(
         path=file_path,
         media_type="application/vnd.apple.pkpass",
-        filename=file_path.name
+        filename="package.pkpass"
     )
 
 @router.get("/validate")

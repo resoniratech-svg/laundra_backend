@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import time
+import uuid
 
 from app.core.database import get_db
 from app.dependencies import get_current_admin, get_current_user
@@ -174,3 +175,90 @@ def get_wallet_metrics(
             "failed_updates": 0
         }
     }
+
+from app.services.whatsapp_service import WhatsAppService
+from sqlalchemy.orm import joinedload
+from urllib.parse import quote
+
+@router.get(
+    "/admin/package/{customer_package_id}/details",
+    summary="Get package wallet details",
+    description="Gets the package details, including wallet URLs and QR."
+)
+def get_package_wallet_details(
+    customer_package_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    pkg = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
+        CustomerPackage.id == customer_package_id,
+        CustomerPackage.tenant_id == current_admin.tenant_id
+    ).first()
+    
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Customer package not found.")
+        
+    customer = db.query(User).filter(User.id == pkg.customer_id).first()
+    wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == pkg.id).first()
+    
+    return {
+        "customerName": customer.name if customer else "Unknown Customer",
+        "packageName": pkg.package.name if pkg.package else "Prepaid Package",
+        "originalAmount": float(pkg.package_value or 0.0),
+        "remainingBalance": float(pkg.current_balance or 0.0),
+        "expiryDate": pkg.expiry_date.isoformat() if pkg.expiry_date else None,
+        "packageStatus": pkg.status,
+        "appleWalletStatus": "ACTIVE" if pkg.apple_wallet_url else "NOT_GENERATED",
+        "googleWalletStatus": wallet_pass.status if wallet_pass else ("ACTIVE" if pkg.google_wallet_url else "NOT_GENERATED"),
+        "qrPreview": wallet_pass.qr_token if wallet_pass else None,
+        "appleWalletUrl": pkg.apple_wallet_url,
+        "googleWalletUrl": pkg.google_wallet_url
+    }
+
+@router.get(
+    "/admin/package/{customer_package_id}/whatsapp-link",
+    summary="Get WhatsApp Deep Link for package",
+    description="Gets the WhatsApp deep link for the customer's package."
+)
+def get_whatsapp_link(
+    customer_package_id: uuid.UUID,
+    portal_url: str,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    pkg = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
+        CustomerPackage.id == customer_package_id,
+        CustomerPackage.tenant_id == current_admin.tenant_id
+    ).first()
+    
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Customer package not found.")
+        
+    customer = db.query(User).filter(User.id == pkg.customer_id).first()
+    
+    pkg_name = pkg.package.name if pkg.package else "Prepaid Package"
+    balance = float(pkg.current_balance or 0.0)
+    
+    text_msg = f"Hi {customer.name} 👋!\nYour Prepaid Package ({pkg_name}) is active!\n\n💳 Balance: QR {balance}\n📲 Access Portal: {portal_url}\n\n"
+    
+    wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == pkg.id).first()
+    if wallet_pass and wallet_pass.qr_url:
+        from app.core.config import settings
+        frontend_url = settings.FRONTEND_URL.rstrip('/')
+        text_msg += f"🔳 QR Code Link:\n{frontend_url}{wallet_pass.qr_url}\n\n"
+        
+    if pkg.apple_wallet_url:
+        from app.core.config import settings
+        frontend_url = settings.FRONTEND_URL.rstrip('/')
+        text_msg += f"🍎 Add to Wallet:\n{frontend_url}{pkg.apple_wallet_url}\n\n"
+        
+    text_msg += "Thank you for choosing Laundra Laundry Services!"
+    
+    clean_phone = "".join(filter(str.isdigit, customer.phone or ""))
+    
+    if clean_phone:
+        deep_link = f"https://api.whatsapp.com/send?phone={clean_phone}&text={quote(text_msg)}"
+    else:
+        deep_link = f"https://api.whatsapp.com/send?text={quote(text_msg)}"
+        
+    return {"deep_link": deep_link}

@@ -47,7 +47,7 @@ class SigningService:
                 builder = pkcs7.PKCS7SignatureBuilder()
                 manifest_data = self.manifest.read_bytes()
                 builder = builder.set_data(manifest_data)
-                builder = builder.add_signer(cert, key, hashes.SHA1())
+                builder = builder.add_signer(cert, key, hashes.SHA256())
                 if wwdr_cert:
                     builder = builder.add_certificate(wwdr_cert)
                 for extra in add_certs:
@@ -56,7 +56,7 @@ class SigningService:
                 sig_bytes = builder.sign(serialization.Encoding.DER, options)
                 self.signature.parent.mkdir(parents=True, exist_ok=True)
                 self.signature.write_bytes(sig_bytes)
-                logger.info("Successfully signed manifest.json with Python cryptography (SHA-1).")
+                logger.info("Successfully signed manifest.json with Python cryptography (SHA-256).")
                 return self.signature
             except Exception as e:
                 logger.error(f"Cryptography signing error: {e}")

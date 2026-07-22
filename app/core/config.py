@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     APP_NAME: str = "Laundry SaaS Backend"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
+    
+    FRONTEND_URL: str = "http://localhost:5173"
 
     GOOGLE_WALLET_ISSUER_ID: str = "338800000023177180"
     GOOGLE_WALLET_CLASS_ID: str = "338800000023177180.laundry_package"

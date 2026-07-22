@@ -34,6 +34,11 @@ class CustomerPackageCreate(CustomerPackageBase):
     customer_id: uuid.UUID
     coupon_code: Optional[str] = None
 
+class WalletGenerationStatus(BaseModel):
+    google_wallet: bool = False
+    apple_wallet: bool = False
+    qr_code: bool = False
+
 class CustomerPackageResponse(CustomerPackageBase):
     id: uuid.UUID
     tenant_id: uuid.UUID
@@ -52,6 +57,7 @@ class CustomerPackageResponse(CustomerPackageBase):
     google_wallet_url: Optional[str] = None
     pass_color: str
     package: Optional[PrepaidPackageResponse] = None
+    wallet_generation: Optional[WalletGenerationStatus] = None
 
     class Config:
         from_attributes = True
