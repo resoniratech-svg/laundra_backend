@@ -166,9 +166,9 @@ app.add_middleware(
         "https://localhost:5173",
         "http://127.0.0.1:5173",
         "https://laundry-project-laundry-frontend.cocjl5.easypanel.host",
-        settings.FRONTEND_BASE_URL
+        settings.FRONTEND_BASE_URL,
+        print(f"[STARTUP] CORS allowed origins: {settings.FRONTEND_BASE_URL}")
     ],
-    allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
