@@ -1,3 +1,4 @@
+import traceback
 import uuid
 import logging
 from sqlalchemy.orm import Session
@@ -10,7 +11,11 @@ from app.models.user import User
 
 
 logger = logging.getLogger(__name__)
+async def generic_exception_handler(request, exc):
+    logger.exception("Unhandled exception")
+    traceback.print_exc()
 
+    raise exc
 class WalletService:
     @staticmethod
     def generate_google_wallet_link(package: CustomerPackage, customer_name: str = "Customer", company_name: str = "Laundra Laundry") -> str:

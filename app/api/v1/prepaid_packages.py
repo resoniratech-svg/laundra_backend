@@ -217,41 +217,21 @@ def get_customer_packages(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get all purchased packages for a specific customer"""
-    pkgs = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
-        CustomerPackage.customer_id == customer_id,
-        CustomerPackage.tenant_id == current_user.tenant_id
-    ).order_by(CustomerPackage.purchase_date.desc()).all()
-    
-    # Auto-update status for expired ones & generate missing wallet URLs before returning
-    now = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
-    customer = db.query(User).filter(User.id == customer_id).first()
-    company_name = getattr(current_user, 'company', None).name if getattr(current_user, 'company', None) else "Laundra Laundry"
+    """
+    Get all purchased packages for a specific customer
+    (Temporary simplified version for debugging)
+    """
 
-    for p in pkgs:
-        if p.status == "ACTIVE":
-            if p.expiry_date:
-                exp_date_aware = p.expiry_date
-                if exp_date_aware.tzinfo is None:
-                    exp_date_aware = exp_date_aware.replace(tzinfo=datetime.timezone.utc)
-                if now > exp_date_aware:
-                    p.status = "EXPIRED"
-                    db.commit()
-                    continue
-
-            if (not p.google_wallet_url or not p.apple_wallet_url) and customer:
-                try:
-                    WalletService.create_and_save_wallet_pass(
-                        db=db,
-                        package=p,
-                        customer=customer,
-                        company_name=company_name
-                    )
-                    db.refresh(p)
-                except Exception as e:
-                    import traceback
-                    print(f"Could not generate wallet pass on the fly: {e}")
-                    print(traceback.format_exc())
+    pkgs = (
+        db.query(CustomerPackage)
+        .options(joinedload(CustomerPackage.package))
+        .filter(
+            CustomerPackage.customer_id == customer_id,
+            CustomerPackage.tenant_id == current_user.tenant_id
+        )
+        .order_by(CustomerPackage.purchase_date.desc())
+        .all()
+    )
 
     return pkgs
 
