@@ -33,8 +33,6 @@ Your Digital Membership Card is ready.
 ██████████
 
 Buttons
-[ Add to Google Wallet ] -> {package.google_wallet_url or ''}
-OR
 [ Add to Apple Wallet ] -> {package.apple_wallet_url or ''}
 ------------------------------------------------
         """

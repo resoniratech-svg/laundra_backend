@@ -29,10 +29,7 @@ class WalletPass(BaseModel):
     apple_pass_type_identifier: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     apple_pass_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Google Wallet Fields
-    google_class_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    google_object_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    google_wallet_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
 
     # QR Code Field
     qr_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

@@ -7,9 +7,7 @@ from app.core.config import settings
 from app.models.customer_package import CustomerPackage
 from app.models.wallet_pass import WalletPass
 from app.models.user import User
-from app.wallet.object_service import create_wallet_object
-from app.wallet.jwt_service import generate_add_to_wallet_url
-from app.wallet.exceptions import WalletException
+
 
 logger = logging.getLogger(__name__)
 

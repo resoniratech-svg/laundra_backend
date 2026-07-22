@@ -130,13 +130,15 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 11 failed: {e}")
 
-# Isolated migration 12 – fix missing columns for orders and wallet_passes
+# Run Alembic migrations programmatically
 try:
-    with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS applied_package_id UUID;"))
-        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS tenant_id UUID;"))
+    import alembic.config
+    import alembic.command
+    alembic_cfg = alembic.config.Config("alembic.ini")
+    alembic.command.upgrade(alembic_cfg, "head")
+    print("[STARTUP] Alembic migrations applied successfully.")
 except Exception as e:
-    print(f"[STARTUP WARNING] Migration 12 failed: {e}")
+    print(f"[STARTUP WARNING] Alembic migration failed: {e}")
 
 
 app = FastAPI(

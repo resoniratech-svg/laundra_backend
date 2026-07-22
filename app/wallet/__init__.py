@@ -1,3 +1,0 @@
-"""
-Google Wallet Integration Module
-"""

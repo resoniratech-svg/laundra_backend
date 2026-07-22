@@ -29,7 +29,7 @@ class CustomerPackage(Base):
     secure_token: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
     
     apple_wallet_url: Mapped[str] = mapped_column(Text, nullable=True)
-    google_wallet_url: Mapped[str] = mapped_column(Text, nullable=True)
+
     pass_color: Mapped[str] = mapped_column(String(20), default="GOLD") # GOLD, GREY, ORANGE, WHITE
 
     company = relationship("Company")
