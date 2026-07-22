@@ -250,7 +250,9 @@ def get_customer_packages(
                     )
                     db.refresh(p)
                 except Exception as e:
+                    import traceback
                     print(f"Could not generate wallet pass on the fly: {e}")
+                    print(traceback.format_exc())
 
     return pkgs
 

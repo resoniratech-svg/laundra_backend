@@ -143,20 +143,24 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(SQLAlchemyError, sqlalchemy_exception_handler)
 app.add_exception_handler(Exception, generic_exception_handler)
 
-# CORS configuration
+# Custom Middlewares
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(LoggingMiddleware)
+app.add_middleware(TenantMiddleware)
+
+# CORS configuration MUST BE LAST to wrap all other middlewares
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173", 
+        "http://127.0.0.1:5173",
+        "https://laundry-project-laundry-frontend.cocjl5.easypanel.host"
+    ],
     allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Custom Middlewares
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(LoggingMiddleware)
-app.add_middleware(TenantMiddleware)
 
 app.include_router(router)
 

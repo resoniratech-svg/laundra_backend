@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import time
@@ -221,6 +221,7 @@ def get_package_wallet_details(
     description="Gets the WhatsApp deep link for the customer's package."
 )
 def get_whatsapp_link(
+    request: Request,
     customer_package_id: uuid.UUID,
     portal_url: str,
     db: Session = Depends(get_db),
@@ -241,16 +242,13 @@ def get_whatsapp_link(
     
     text_msg = f"Hi {customer.name} 👋!\nYour Prepaid Package ({pkg_name}) is active!\n\n💳 Balance: QR {balance}\n📲 Access Portal: {portal_url}\n\n"
     
+    backend_url = str(request.base_url).rstrip('/')
     wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == pkg.id).first()
     if wallet_pass and wallet_pass.qr_url:
-        from app.core.config import settings
-        frontend_url = settings.FRONTEND_URL.rstrip('/')
-        text_msg += f"🔳 QR Code Link:\n{frontend_url}{wallet_pass.qr_url}\n\n"
+        text_msg += f"🔳 QR Code Link:\n{backend_url}{wallet_pass.qr_url}\n\n"
         
     if pkg.apple_wallet_url:
-        from app.core.config import settings
-        frontend_url = settings.FRONTEND_URL.rstrip('/')
-        text_msg += f"🍎 Add to Wallet:\n{frontend_url}{pkg.apple_wallet_url}\n\n"
+        text_msg += f"🍎 Add to Wallet:\n{backend_url}{pkg.apple_wallet_url}\n\n"
         
     text_msg += "Thank you for choosing Laundra Laundry Services!"
     
@@ -262,3 +260,44 @@ def get_whatsapp_link(
         deep_link = f"https://api.whatsapp.com/send?text={quote(text_msg)}"
         
     return {"deep_link": deep_link}
+
+from fastapi.responses import FileResponse
+import os
+from pathlib import Path
+
+@router.get(
+    "/qr/{filename}",
+    summary="Serve QR Code Image",
+    description="Serves the locally generated PNG QR code image for a wallet pass."
+)
+def serve_qr_code(filename: str):
+    qr_path = Path("media/qr_codes") / filename
+    if not qr_path.exists():
+        raise HTTPException(status_code=404, detail="QR Code not found")
+    return FileResponse(path=qr_path, media_type="image/png")
+
+import qrcode
+from io import BytesIO
+from fastapi.responses import StreamingResponse
+
+@router.get(
+    "/generate-qr",
+    summary="Generate QR Code dynamically",
+    description="Generates a PNG QR code on the fly for any given data string."
+)
+def generate_qr(data: str):
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    img_byte_arr = BytesIO()
+    img.save(img_byte_arr, format='PNG')
+    img_byte_arr.seek(0)
+    
+    return StreamingResponse(img_byte_arr, media_type="image/png")
