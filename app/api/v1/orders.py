@@ -47,8 +47,8 @@ def create_order(
     )
     if order.applied_package_id:
         cp = db.query(CustomerPackage).filter(CustomerPackage.id == order.applied_package_id).first()
-        if cp:
-            setattr(order, 'package_name', cp.package_name)
+        if cp and cp.package:
+            setattr(order, 'package_name', cp.package.name)
     return order
 
 @router.get("", response_model=List[OrderOut])
@@ -62,8 +62,8 @@ def list_orders(
         o.items = db.query(OrderItem).filter(OrderItem.order_id == o.id).all()
         if o.applied_package_id:
             cp = db.query(CustomerPackage).filter(CustomerPackage.id == o.applied_package_id).first()
-            if cp:
-                setattr(o, 'package_name', cp.package_name)
+            if cp and cp.package:
+                setattr(o, 'package_name', cp.package.name)
     return orders
 
 @router.get("/{id}", response_model=OrderOut)
@@ -82,8 +82,8 @@ def get_order(
     order.items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
     if order.applied_package_id:
         cp = db.query(CustomerPackage).filter(CustomerPackage.id == order.applied_package_id).first()
-        if cp:
-            setattr(order, 'package_name', cp.package_name)
+        if cp and cp.package:
+            setattr(order, 'package_name', cp.package.name)
     return order
 
 @router.patch("/{id}/status", response_model=OrderOut)
