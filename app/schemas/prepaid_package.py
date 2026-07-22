@@ -8,10 +8,10 @@ class PrepaidPackageBase(BaseModel):
     name: str
     code: Optional[str] = None
     description: Optional[str] = None
-    original_price: Decimal
-    offer_price: Decimal
-    total_quantity: int
-    eligible_services: List[Any]
+    original_price: Optional[Decimal] = Decimal('0.0')
+    offer_price: Optional[Decimal] = Decimal('0.0')
+    total_quantity: Optional[int] = 0
+    eligible_services: Optional[List[Any]] = []
     validity_days: Optional[int] = None
     start_date: Optional[date] = None
     expiry_date: Optional[date] = None

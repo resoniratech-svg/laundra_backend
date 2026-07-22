@@ -14,7 +14,7 @@ class OrderItemCreate(OrderItemBase):
 class OrderItemOut(OrderItemBase):
     id: UUID
     order_id: UUID
-    price: Decimal
+    price: Optional[Decimal] = Decimal('0.0')
 
     class Config:
         from_attributes = True
@@ -33,9 +33,9 @@ class OrderOut(OrderBase):
     tenant_id: UUID
     order_number: Optional[str] = None
     status: Optional[str] = None
-    total_amount: Decimal
-    discount: Decimal
-    paid_amount: Decimal
+    total_amount: Optional[Decimal] = Decimal('0.0')
+    discount: Optional[Decimal] = Decimal('0.0')
+    paid_amount: Optional[Decimal] = Decimal('0.0')
     payment_status: Optional[str] = None
     package_name: Optional[str] = None
     applied_package_id: Optional[UUID] = None
