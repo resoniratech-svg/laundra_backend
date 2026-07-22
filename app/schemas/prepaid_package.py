@@ -6,7 +6,7 @@ import uuid
 
 class PrepaidPackageBase(BaseModel):
     name: str
-    code: str
+    code: Optional[str] = None
     description: Optional[str] = None
     original_price: Decimal
     offer_price: Decimal
@@ -47,15 +47,15 @@ class CustomerPackageResponse(CustomerPackageBase):
     activation_date: Optional[datetime] = None
     expiry_date: Optional[datetime] = None
     total_quantity: Optional[int] = None
-    used_quantity: int
-    package_value: float
-    current_balance: float
-    used_amount: float
-    status: str
-    secure_token: str
+    used_quantity: Optional[int] = 0
+    package_value: Optional[float] = 0.0
+    current_balance: Optional[float] = 0.0
+    used_amount: Optional[float] = 0.0
+    status: Optional[str] = "ACTIVE"
+    secure_token: Optional[str] = None
     apple_wallet_url: Optional[str] = None
     google_wallet_url: Optional[str] = None
-    pass_color: str
+    pass_color: Optional[str] = "GOLD"
     package: Optional[PrepaidPackageResponse] = None
     wallet_generation: Optional[WalletGenerationStatus] = None
 
