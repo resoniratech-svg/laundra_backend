@@ -130,6 +130,14 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 11 failed: {e}")
 
+# Isolated migration 12 – fix missing columns for orders and wallet_passes
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS applied_package_id UUID;"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS tenant_id UUID;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 12 failed: {e}")
+
 
 app = FastAPI(
     title=settings.APP_NAME,
