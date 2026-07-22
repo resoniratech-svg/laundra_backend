@@ -21,7 +21,6 @@ from app.models.wallet_pass import WalletPass
 from app.models.payment import Payment
 from app.services.wallet_service import WalletService
 from app.services.whatsapp_service import WhatsAppService
-from app.wallet.object_manager import build_wallet_object_payload, generate_google_wallet_save_url
 
 router = APIRouter()
 
