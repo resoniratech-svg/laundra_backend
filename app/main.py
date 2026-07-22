@@ -174,13 +174,6 @@ app.add_middleware(
 
 app.include_router(router)
 
-# Initialize Google Wallet Generic Class on Application Startup
-try:
-    from app.wallet.class_service import create_or_get_generic_class
-    wallet_res = create_or_get_generic_class()
-    print(f"[GOOGLE WALLET STARTUP] {wallet_res.get('message', 'Generic Class verified')}")
-except Exception as gw_e:
-    print(f"[GOOGLE WALLET STARTUP WARNING] Could not verify Generic Class on startup: {gw_e}")
 
 @app.get("/")
 def home():

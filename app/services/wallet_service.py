@@ -16,32 +16,8 @@ logger = logging.getLogger(__name__)
 class WalletService:
     @staticmethod
     def generate_google_wallet_link(package: CustomerPackage, customer_name: str = "Customer", company_name: str = "Laundra Laundry") -> str:
-        """
-        Orchestrates Google Wallet object building and signed JWT save URL generation.
-        Phase 13: Includes graceful exception handling fallback.
-        """
-        try:
-            pkg_title = package.package.name if hasattr(package, 'package') and package.package else "Prepaid Package"
-            exp_str = package.expiry_date.strftime('%Y-%m-%d') if package.expiry_date else "N/A"
-            
-            wallet_obj = create_wallet_object(
-                customer_package_id=str(package.id),
-                customer_name=customer_name,
-                package_name=pkg_title,
-                company_name=company_name,
-                remaining_balance=float(package.current_balance or 0.0),
-                remaining_quantity=package.total_quantity - package.used_quantity if package.total_quantity is not None else None,
-                expiry_date_str=exp_str,
-                status=package.status or "ACTIVE",
-                secure_token=package.secure_token
-            )
-            
-            save_url = generate_add_to_wallet_url(wallet_obj["payload"])
-            return save_url
-        except Exception as e:
-            logger.error(f"Error generating Google Wallet link for package {package.id}: {e}")
-            # Fallback URL if token/JWT generation encounters issue
-            return f"https://pay.google.com/gp/v/save/fallback_{str(package.id)[:8]}"
+        """Disabled as per user request"""
+        return ""
 
     @staticmethod
     def create_and_save_wallet_pass(
@@ -98,22 +74,7 @@ class WalletService:
         except Exception as e:
             logger.error(f"Error generating QR Code for package {package.id}: {e}")
 
-        # 2. Google Wallet
-        try:
-            google_url = WalletService.generate_google_wallet_link(package, customer_name=cust_name, company_name=company_name)
-            package.google_wallet_url = google_url
-            
-            issuer_id = settings.GOOGLE_WALLET_ISSUER_ID
-            clean_id = str(package.id).replace("-", "")
-            object_id = f"{issuer_id}.customer_{clean_id}"
-            class_id = settings.GOOGLE_WALLET_CLASS_ID
-            
-            wallet_pass.google_class_id = class_id
-            wallet_pass.google_object_id = object_id
-            wallet_pass.google_wallet_url = google_url
-            status["google_wallet"] = True
-        except Exception as e:
-            logger.error(f"Error generating Google Wallet link for package {package.id}: {e}")
+
 
         # 3. Apple Wallet
         try:
@@ -163,12 +124,9 @@ class WalletService:
         """
         try:
             cust_name = customer.name if customer else "Customer"
-            google_url = WalletService.generate_google_wallet_link(package, customer_name=cust_name)
-            package.google_wallet_url = google_url
             
             wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
             if wallet_pass:
-                wallet_pass.wallet_url = google_url
                 wallet_pass.pass_status = package.status or "ACTIVE"
             
             db.commit()
