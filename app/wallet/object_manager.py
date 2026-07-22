@@ -94,7 +94,7 @@ def generate_google_wallet_save_url(wallet_object: Dict[str, Any]) -> str:
     payload_claims = {
         "iss": credentials.service_account_email,
         "aud": "google",
-        "origins": ["http://localhost:5173", "http://127.0.0.1:5173", "https://laundra.app"],
+        "origins": ["http://localhost:5173", "http://127.0.0.1:5173", "https://laundra.app", settings.FRONTEND_BASE_URL],
         "typ": "savetowallet",
         "iat": now,
         "payload": {

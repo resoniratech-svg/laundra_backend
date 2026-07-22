@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
     
-    FRONTEND_URL: str = "http://localhost:5173"
-
+    FRONTEND_BASE_URL: str = "https://laundry-project-laundry-frontend.cocjl5.easypanel.host"
+    BACKEND_BASE_URL: str = "https://laundry-project-laundry-backend.cocjl5.easypanel.host"
     GOOGLE_WALLET_ISSUER_ID: str = "338800000023177180"
     GOOGLE_WALLET_CLASS_ID: str = "338800000023177180.laundry_package"
     GOOGLE_WALLET_KEY_PATH: str = "secrets/google-wallet.json"

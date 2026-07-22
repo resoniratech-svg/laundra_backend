@@ -31,12 +31,12 @@ class OrderCreate(OrderBase):
 class OrderOut(OrderBase):
     id: UUID
     tenant_id: UUID
-    order_number: str
-    status: str
+    order_number: Optional[str] = None
+    status: Optional[str] = None
     total_amount: Decimal
     discount: Decimal
     paid_amount: Decimal
-    payment_status: str
+    payment_status: Optional[str] = None
     package_name: Optional[str] = None
     applied_package_id: Optional[UUID] = None
     qr_code: Optional[str] = None

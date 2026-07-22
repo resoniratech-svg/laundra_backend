@@ -153,8 +153,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173", 
+        "https://localhost:5173",
         "http://127.0.0.1:5173",
-        "https://laundry-project-laundry-frontend.cocjl5.easypanel.host"
+        "https://laundry-project-laundry-frontend.cocjl5.easypanel.host",
+        settings.FRONTEND_BASE_URL
     ],
     allow_origin_regex=r"https?://.*",
     allow_credentials=True,

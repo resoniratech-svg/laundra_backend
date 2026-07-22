@@ -240,9 +240,15 @@ def get_whatsapp_link(
     pkg_name = pkg.package.name if pkg.package else "Prepaid Package"
     balance = float(pkg.current_balance or 0.0)
     
-    text_msg = f"Hi {customer.name} 👋!\nYour Prepaid Package ({pkg_name}) is active!\n\n💳 Balance: QR {balance}\n📲 Access Portal: {portal_url}\n\n"
+    from app.core.config import settings
+    frontend_url = settings.FRONTEND_BASE_URL.rstrip('/')
+    backend_url = settings.BACKEND_BASE_URL.rstrip('/')
     
-    backend_url = str(request.base_url).rstrip('/')
+    # Generate direct frontend customer portal link
+    portal_link = f"{frontend_url}/customer?login={customer.id}"
+    
+    text_msg = f"Hi {customer.name} 👋!\nYour Prepaid Package ({pkg_name}) is active!\n\n💳 Balance: QR {balance}\n📲 Access Portal: {portal_link}\n\n"
+    
     wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == pkg.id).first()
     if wallet_pass and wallet_pass.qr_url:
         text_msg += f"🔳 QR Code Link:\n{backend_url}{wallet_pass.qr_url}\n\n"
