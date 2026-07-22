@@ -208,51 +208,136 @@ def update_customer(
     update_data = payload.model_dump(exclude_unset=True)
     return customer_repo.update(db, db_obj=customer, obj_in=update_data)
 
+def purge_customer_and_dependencies(db: Session, customer_id: Optional[UUID] = None, email: Optional[str] = None, tenant_id: Optional[UUID] = None) -> bool:
+    target_customer = None
+    if customer_id:
+        target_customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not target_customer and email:
+        query = db.query(Customer).filter(Customer.email == email)
+        if tenant_id:
+            query = query.filter(Customer.tenant_id == tenant_id)
+        target_customer = query.first()
+
+    associated_user = None
+    target_email = email or (target_customer.email if target_customer else None)
+    if target_email:
+        u_query = db.query(User).filter(User.email == target_email, User.role == "CUSTOMER")
+        if tenant_id:
+            u_query = u_query.filter(User.tenant_id == tenant_id)
+        associated_user = u_query.first()
+
+    if not target_customer and not associated_user:
+        return False
+
+    c_id = target_customer.id if target_customer else None
+    u_id = associated_user.id if associated_user else None
+    user_ids = [uid for uid in [c_id, u_id] if uid is not None]
+
+    # 1. Gather & delete orders and dependent items
+    if c_id:
+        orders = db.query(Order).filter(Order.customer_id == c_id).all()
+        order_ids = [o.id for o in orders]
+
+        if order_ids:
+            try:
+                from app.models.order_item import OrderItem
+                db.query(OrderItem).filter(OrderItem.order_id.in_(order_ids)).delete(synchronize_session=False)
+            except Exception:
+                pass
+
+            try:
+                from app.models.payment import Payment
+                db.query(Payment).filter(Payment.order_id.in_(order_ids)).delete(synchronize_session=False)
+            except Exception:
+                pass
+
+            try:
+                from app.models.delivery import Delivery
+                db.query(Delivery).filter(Delivery.order_id.in_(order_ids)).delete(synchronize_session=False)
+            except Exception:
+                pass
+
+            try:
+                from app.models.invoice import Invoice
+                db.query(Invoice).filter(Invoice.order_id.in_(order_ids)).delete(synchronize_session=False)
+            except Exception:
+                pass
+
+            try:
+                from app.models.package_usage_history import PackageUsageHistory
+                db.query(PackageUsageHistory).filter(PackageUsageHistory.order_id.in_(order_ids)).delete(synchronize_session=False)
+            except Exception:
+                pass
+
+            try:
+                db.query(Order).filter(Order.id.in_(order_ids)).delete(synchronize_session=False)
+            except Exception:
+                pass
+
+    # 2. Delete Customer Packages
+    if user_ids:
+        try:
+            from app.models.customer_package import CustomerPackage
+            from app.models.package_usage_history import PackageUsageHistory
+            cps = db.query(CustomerPackage).filter(CustomerPackage.customer_id.in_(user_ids)).all()
+            cp_ids = [cp.id for cp in cps]
+            if cp_ids:
+                db.query(PackageUsageHistory).filter(PackageUsageHistory.customer_package_id.in_(cp_ids)).delete(synchronize_session=False)
+                db.query(CustomerPackage).filter(CustomerPackage.id.in_(cp_ids)).delete(synchronize_session=False)
+        except Exception:
+            pass
+
+        try:
+            from app.models.wallet_pass import WalletPass
+            db.query(WalletPass).filter(WalletPass.customer_id.in_(user_ids)).delete(synchronize_session=False)
+        except Exception:
+            pass
+
+    # 3. Customer Address, Reviews, Support Tickets
+    if c_id:
+        try:
+            from app.models.customer_address import CustomerAddress
+            db.query(CustomerAddress).filter(CustomerAddress.customer_id == c_id).delete(synchronize_session=False)
+        except Exception:
+            pass
+
+        try:
+            from app.models.review import Review
+            db.query(Review).filter(Review.customer_id == c_id).delete(synchronize_session=False)
+        except Exception:
+            pass
+
+        try:
+            from app.models.customer_support_ticket import CustomerSupportTicket
+            db.query(CustomerSupportTicket).filter(CustomerSupportTicket.customer_id == c_id).delete(synchronize_session=False)
+        except Exception:
+            pass
+
+        try:
+            db.query(Customer).filter(Customer.referred_by_id == c_id).update({"referred_by_id": None}, synchronize_session=False)
+        except Exception:
+            pass
+
+        db.query(Customer).filter(Customer.id == c_id).delete(synchronize_session=False)
+
+    if associated_user:
+        db.delete(associated_user)
+
+    db.commit()
+    return True
+
 @router.delete("/{customer_id}", status_code=status.HTTP_200_OK)
 def delete_customer(
     customer_id: UUID,
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    customer = customer_repo.get(db, customer_id, tenant_id=current_admin.tenant_id)
-    if not customer:
+    success = purge_customer_and_dependencies(db, customer_id=customer_id, tenant_id=current_admin.tenant_id)
+    if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Customer not found"
         )
-
-    # Delete all dependent records to avoid FK violations
-    try:
-        from app.models.review import Review
-        db.query(Review).filter(Review.customer_id == customer_id).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    try:
-        from app.models.customer_support_ticket import CustomerSupportTicket
-        db.query(CustomerSupportTicket).filter(CustomerSupportTicket.customer_id == customer_id).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    try:
-        from app.models.customer_address import CustomerAddress
-        db.query(CustomerAddress).filter(CustomerAddress.customer_id == customer_id).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    try:
-        db.query(Order).filter(Order.customer_id == customer_id).delete(synchronize_session=False)
-    except Exception:
-        pass
-
-    # Delete associated user login record
-    associated_user = db.query(User).filter(User.email == customer.email, User.role == "CUSTOMER").first()
-    if associated_user:
-        db.delete(associated_user)
-
-    # Delete customer record
-    db.query(Customer).filter(Customer.id == customer_id).delete(synchronize_session=False)
-    db.commit()
     return {"success": True, "message": "Customer and all associated data deleted successfully"}
 
 @router.delete("/by-email/{email}", status_code=status.HTTP_200_OK)
@@ -261,15 +346,12 @@ def delete_customer_by_email(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    customer = db.query(Customer).filter(Customer.email == email, Customer.tenant_id == current_admin.tenant_id).first()
-    if customer:
-        customer_repo.remove(db, id=customer.id)
-        
-    associated_user = db.query(User).filter(User.email == email, User.role == "CUSTOMER", User.tenant_id == current_admin.tenant_id).first()
-    if associated_user:
-        db.delete(associated_user)
-        
-    db.commit()
+    success = purge_customer_and_dependencies(db, email=email, tenant_id=current_admin.tenant_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found"
+        )
     return {"success": True, "message": "Customer deleted successfully"}
 
 @router.get("/{customer_id}/orders", response_model=List[OrderOut])
