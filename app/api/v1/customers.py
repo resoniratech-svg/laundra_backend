@@ -233,97 +233,130 @@ def purge_customer_and_dependencies(db: Session, customer_id: Optional[UUID] = N
     u_id = associated_user.id if associated_user else None
     user_ids = [uid for uid in [c_id, u_id] if uid is not None]
 
-    # 1. Gather & delete orders and dependent items
-    if c_id:
-        orders = db.query(Order).filter(Order.customer_id == c_id).all()
-        order_ids = [o.id for o in orders]
-
-        if order_ids:
+    # Helper for safe transaction savepoints so any failed child deletion doesn't abort the entire transaction
+    def safe_execute(action):
+        try:
+            sp = db.begin_nested()
+            action()
+            sp.commit()
+        except Exception as e:
             try:
-                from app.models.order_item import OrderItem
-                db.query(OrderItem).filter(OrderItem.order_id.in_(order_ids)).delete(synchronize_session=False)
+                sp.rollback()
             except Exception:
                 pass
 
-            try:
-                from app.models.payment import Payment
-                db.query(Payment).filter(Payment.order_id.in_(order_ids)).delete(synchronize_session=False)
-            except Exception:
-                pass
+    # 1. Delete WalletPass records first (references Customer, CustomerPackage, Order)
+    if user_ids:
+        def del_wallet_passes():
+            from app.models.wallet_pass import WalletPass
+            db.query(WalletPass).filter(
+                (WalletPass.customer_id.in_(user_ids)) |
+                (WalletPass.tenant_id == (tenant_id or (target_customer.tenant_id if target_customer else None)))
+            ).filter(WalletPass.customer_id.in_(user_ids)).delete(synchronize_session=False)
+        safe_execute(del_wallet_passes)
 
-            try:
-                from app.models.delivery import Delivery
-                db.query(Delivery).filter(Delivery.order_id.in_(order_ids)).delete(synchronize_session=False)
-            except Exception:
-                pass
-
-            try:
-                from app.models.invoice import Invoice
-                db.query(Invoice).filter(Invoice.order_id.in_(order_ids)).delete(synchronize_session=False)
-            except Exception:
-                pass
-
-            try:
-                from app.models.package_usage_history import PackageUsageHistory
-                db.query(PackageUsageHistory).filter(PackageUsageHistory.order_id.in_(order_ids)).delete(synchronize_session=False)
-            except Exception:
-                pass
-
-            try:
-                db.query(Order).filter(Order.id.in_(order_ids)).delete(synchronize_session=False)
-            except Exception:
-                pass
-
-    # 2. Delete Customer Packages
+    # 2. Gather Customer Packages and Order IDs
+    cp_ids = []
     if user_ids:
         try:
             from app.models.customer_package import CustomerPackage
-            from app.models.package_usage_history import PackageUsageHistory
             cps = db.query(CustomerPackage).filter(CustomerPackage.customer_id.in_(user_ids)).all()
             cp_ids = [cp.id for cp in cps]
-            if cp_ids:
-                db.query(PackageUsageHistory).filter(PackageUsageHistory.customer_package_id.in_(cp_ids)).delete(synchronize_session=False)
-                db.query(CustomerPackage).filter(CustomerPackage.id.in_(cp_ids)).delete(synchronize_session=False)
         except Exception:
             pass
 
-        try:
-            from app.models.wallet_pass import WalletPass
-            db.query(WalletPass).filter(WalletPass.customer_id.in_(user_ids)).delete(synchronize_session=False)
-        except Exception:
-            pass
-
-    # 3. Customer Address, Reviews, Support Tickets
+    order_ids = []
     if c_id:
         try:
+            orders = db.query(Order).filter(Order.customer_id == c_id).all()
+            order_ids = [o.id for o in orders]
+        except Exception:
+            pass
+
+    # 3. Delete Package Usage History (references CustomerPackage and Order)
+    def del_package_usage():
+        from app.models.package_usage_history import PackageUsageHistory
+        filters = []
+        if cp_ids:
+            filters.append(PackageUsageHistory.customer_package_id.in_(cp_ids))
+        if order_ids:
+            filters.append(PackageUsageHistory.order_id.in_(order_ids))
+        if filters:
+            from sqlalchemy import or_
+            db.query(PackageUsageHistory).filter(or_(*filters)).delete(synchronize_session=False)
+    if cp_ids or order_ids:
+        safe_execute(del_package_usage)
+
+    # 4. Delete Customer Packages
+    if cp_ids:
+        def del_customer_packages():
+            from app.models.customer_package import CustomerPackage
+            db.query(CustomerPackage).filter(CustomerPackage.id.in_(cp_ids)).delete(synchronize_session=False)
+        safe_execute(del_customer_packages)
+
+    # 5. Delete Order dependencies & Orders
+    if order_ids:
+        def del_order_items():
+            from app.models.order_item import OrderItem
+            db.query(OrderItem).filter(OrderItem.order_id.in_(order_ids)).delete(synchronize_session=False)
+        safe_execute(del_order_items)
+
+        def del_payments():
+            from app.models.payment import Payment
+            db.query(Payment).filter(Payment.order_id.in_(order_ids)).delete(synchronize_session=False)
+        safe_execute(del_payments)
+
+        def del_deliveries():
+            from app.models.delivery import Delivery
+            db.query(Delivery).filter(Delivery.order_id.in_(order_ids)).delete(synchronize_session=False)
+        safe_execute(del_deliveries)
+
+        def del_invoices():
+            from app.models.invoice import Invoice
+            db.query(Invoice).filter(Invoice.order_id.in_(order_ids)).delete(synchronize_session=False)
+        safe_execute(del_invoices)
+
+        def del_orders():
+            db.query(Order).filter(Order.id.in_(order_ids)).delete(synchronize_session=False)
+        safe_execute(del_orders)
+
+    # 6. Delete Customer Addresses, Reviews, Support Tickets & Unlink Referrals
+    if c_id:
+        def del_addresses():
             from app.models.customer_address import CustomerAddress
             db.query(CustomerAddress).filter(CustomerAddress.customer_id == c_id).delete(synchronize_session=False)
-        except Exception:
-            pass
+        safe_execute(del_addresses)
 
-        try:
+        def del_reviews():
             from app.models.review import Review
             db.query(Review).filter(Review.customer_id == c_id).delete(synchronize_session=False)
-        except Exception:
-            pass
+        safe_execute(del_reviews)
 
-        try:
+        def del_tickets():
             from app.models.customer_support_ticket import CustomerSupportTicket
             db.query(CustomerSupportTicket).filter(CustomerSupportTicket.customer_id == c_id).delete(synchronize_session=False)
-        except Exception:
-            pass
+        safe_execute(del_tickets)
 
-        try:
+        def unlink_referrals():
             db.query(Customer).filter(Customer.referred_by_id == c_id).update({"referred_by_id": None}, synchronize_session=False)
-        except Exception:
-            pass
+        safe_execute(unlink_referrals)
 
-        db.query(Customer).filter(Customer.id == c_id).delete(synchronize_session=False)
+        def del_customer():
+            db.query(Customer).filter(Customer.id == c_id).delete(synchronize_session=False)
+        safe_execute(del_customer)
 
+    # 7. Delete Associated User record
     if associated_user:
-        db.delete(associated_user)
+        def del_user():
+            db.delete(associated_user)
+        safe_execute(del_user)
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise e
+
     return True
 
 @router.delete("/{customer_id}", status_code=status.HTTP_200_OK)
