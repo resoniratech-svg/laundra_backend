@@ -44,8 +44,17 @@ def upgrade() -> None:
         ('remaining_balance', sa.Numeric(10, 2)),
         ('expiry_date', sa.DateTime(timezone=True)),
         ('wallet_created_at', sa.DateTime(timezone=True)),
+        ('wallet_updated_at', sa.DateTime(timezone=True)),
         ('class_id', sa.String(150)),
         ('pass_status', sa.String(20)),
+        ('google_class_id', sa.String(150)),
+        ('google_object_id', sa.String(150)),
+        ('google_wallet_url', sa.Text()),
+        ('order_id', postgresql.UUID(as_uuid=True)),
+        ('pass_type_identifier', sa.String(255)),
+        ('serial_number', sa.String(255)),
+        ('authentication_token', sa.String(255)),
+        ('qr_token', sa.String(500)),
     ]
     for col_name, col_type in extra_wallet_cols:
         if col_name not in wallet_cols:
