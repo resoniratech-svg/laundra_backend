@@ -41,6 +41,12 @@ class WalletService:
 
         try:
             wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
+            pkg_hex = str(package.id).replace('-', '')[:12].upper()
+            tenant_hex = str(package.tenant_id).replace('-', '')[:8].upper()
+            serial_str = f"PASS-{pkg_hex[:8]}"
+            auth_tok = str(uuid.uuid4()).replace('-', '')
+            pass_url = f"/api/v1/wallet/apple/pass/{package.secure_token or package.id}"
+
             if not wallet_pass:
                 wallet_pass = WalletPass(
                     tenant_id=package.tenant_id,
@@ -50,10 +56,29 @@ class WalletService:
                     remaining_balance=float(package.current_balance or 0.0),
                     expiry_date=package.expiry_date,
                     status=package.status or "ACTIVE",
-                    wallet_status="ACTIVE"
+                    wallet_status="ACTIVE",
+                    wallet_object_id=f"OBJ-{pkg_hex}",
+                    class_id=f"CLASS-LAUNDRA-{tenant_hex}",
+                    pass_type_identifier="pass.com.laundry.wallet",
+                    apple_pass_type_identifier="pass.com.laundry.wallet",
+                    serial_number=serial_str,
+                    apple_serial_number=serial_str,
+                    authentication_token=auth_tok,
+                    wallet_url=pass_url
                 )
                 db.add(wallet_pass)
                 db.flush()
+            else:
+                if not wallet_pass.wallet_object_id:
+                    wallet_pass.wallet_object_id = f"OBJ-{pkg_hex}"
+                if not wallet_pass.class_id:
+                    wallet_pass.class_id = f"CLASS-LAUNDRA-{tenant_hex}"
+                if not wallet_pass.wallet_url:
+                    wallet_pass.wallet_url = wallet_pass.apple_pass_url or pass_url
+                if not wallet_pass.serial_number:
+                    wallet_pass.serial_number = wallet_pass.apple_serial_number or serial_str
+                if not wallet_pass.authentication_token:
+                    wallet_pass.authentication_token = auth_tok
         except Exception as e:
             logger.error(f"Failed to fetch/create WalletPass for package {package.id}: {e}")
             return status
@@ -177,27 +202,58 @@ class WalletService:
         pkpass_path = pass_service.generate_pkpass(pass_data, serial_number=serial_number)
 
         if not wallet_pass:
+            pkg_hex = str(uuid.uuid4()).replace('-', '')[:12].upper()
+            tenant_hex = str(tenant_id).replace('-', '')[:8].upper()
+            pass_url = f"/api/v1/wallet/apple/pass/{package_secure_token or serial_number}"
             wallet_pass = WalletPass(
                 tenant_id=tenant_id,
                 customer_id=customer_id,
                 order_id=order_id,
                 pass_type_identifier=settings.APPLE_WALLET_PASS_TYPE_IDENTIFIER,
+                apple_pass_type_identifier=settings.APPLE_WALLET_PASS_TYPE_IDENTIFIER,
                 serial_number=serial_number,
+                apple_serial_number=serial_number,
                 authentication_token=auth_token,
                 qr_token=qr_token,
                 status="ACTIVE",
+                wallet_status="ACTIVE",
+                wallet_object_id=f"OBJ-{pkg_hex}",
+                google_object_id=f"GOBJ-{pkg_hex}",
+                class_id=f"CLASS-LAUNDRA-{tenant_hex}",
+                google_class_id=f"GCLASS-LAUNDRA-{tenant_hex}",
+                wallet_url=pass_url,
+                apple_pass_url=pass_url,
                 pass_file_path=str(pkpass_path)
             )
             db.add(wallet_pass)
             db.commit()
             db.refresh(wallet_pass)
         else:
+            pkg_hex = str(wallet_pass.customer_package_id or wallet_pass.id).replace('-', '')[:12].upper()
+            tenant_hex = str(tenant_id).replace('-', '')[:8].upper()
+            pass_url = f"/api/v1/wallet/apple/pass/{package_secure_token or wallet_pass.customer_package_id or serial_number}"
+
+            if not wallet_pass.wallet_object_id:
+                wallet_pass.wallet_object_id = f"OBJ-{pkg_hex}"
+            if not wallet_pass.google_object_id:
+                wallet_pass.google_object_id = f"GOBJ-{pkg_hex}"
+            if not wallet_pass.class_id:
+                wallet_pass.class_id = f"CLASS-LAUNDRA-{tenant_hex}"
+            if not wallet_pass.google_class_id:
+                wallet_pass.google_class_id = f"GCLASS-LAUNDRA-{tenant_hex}"
+            if not wallet_pass.wallet_url:
+                wallet_pass.wallet_url = pass_url
+            if not wallet_pass.apple_pass_url:
+                wallet_pass.apple_pass_url = pass_url
+
             wallet_pass.pass_type_identifier = settings.APPLE_WALLET_PASS_TYPE_IDENTIFIER
+            wallet_pass.apple_pass_type_identifier = settings.APPLE_WALLET_PASS_TYPE_IDENTIFIER
             wallet_pass.serial_number = serial_number
+            wallet_pass.apple_serial_number = serial_number
             wallet_pass.authentication_token = auth_token
             wallet_pass.qr_token = qr_token
             wallet_pass.pass_file_path = str(pkpass_path)
-            wallet_pass.apple_serial_number = serial_number
+            wallet_pass.apple_pass_url = apple_res_url if 'apple_res_url' in locals() else pass_url
             wallet_pass.apple_pass_type_identifier = settings.APPLE_WALLET_PASS_TYPE_IDENTIFIER
             # db.commit() will be called by orchestrator
 

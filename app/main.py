@@ -149,7 +149,22 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 11 failed: {e}")
 
-# Run Alembic migrations programmatically
+# Isolated migration 12 – populate null/empty values and drop strict NOT NULL constraints on legacy columns
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE wallet_passes ALTER COLUMN wallet_object_id DROP NOT NULL;"))
+        conn.execute(text("UPDATE wallet_passes SET wallet_object_id = 'OBJ-' || UPPER(SUBSTRING(REPLACE(customer_package_id::text, '-', '') FROM 1 FOR 12)) WHERE (wallet_object_id IS NULL OR wallet_object_id = '') AND customer_package_id IS NOT NULL;"))
+        conn.execute(text("UPDATE wallet_passes SET wallet_object_id = 'OBJ-' || UPPER(SUBSTRING(REPLACE(id::text, '-', '') FROM 1 FOR 12)) WHERE (wallet_object_id IS NULL OR wallet_object_id = '');"))
+        
+        conn.execute(text("UPDATE wallet_passes SET google_object_id = 'GOBJ-' || UPPER(SUBSTRING(REPLACE(customer_package_id::text, '-', '') FROM 1 FOR 12)) WHERE (google_object_id IS NULL OR google_object_id = '') AND customer_package_id IS NOT NULL;"))
+        conn.execute(text("UPDATE wallet_passes SET google_object_id = 'GOBJ-' || UPPER(SUBSTRING(REPLACE(id::text, '-', '') FROM 1 FOR 12)) WHERE (google_object_id IS NULL OR google_object_id = '');"))
+        
+        conn.execute(text("UPDATE wallet_passes SET class_id = 'CLASS-LAUNDRA-PASS' WHERE (class_id IS NULL OR class_id = '');"))
+        conn.execute(text("UPDATE wallet_passes SET google_class_id = 'GCLASS-LAUNDRA-PASS' WHERE (google_class_id IS NULL OR google_class_id = '');"))
+        
+        conn.execute(text("UPDATE wallet_passes SET wallet_url = COALESCE(NULLIF(apple_pass_url, ''), NULLIF(qr_url, ''), '/api/v1/wallet/apple/pass/' || id::text) WHERE (wallet_url IS NULL OR wallet_url = '');"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 12 failed: {e}")
 try:
     import alembic.config
     import alembic.command
