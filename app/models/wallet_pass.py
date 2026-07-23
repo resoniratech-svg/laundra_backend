@@ -34,7 +34,15 @@ class WalletPass(BaseModel):
     # QR Code Field
     qr_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Shared Wallet Metadata
+    # Shared & Legacy Wallet Metadata
+    class_id: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    pass_status: Mapped[Optional[str]] = mapped_column(String(20), default="ACTIVE")
+    wallet_object_id: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    wallet_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    google_class_id: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    google_object_id: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    google_wallet_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     wallet_status: Mapped[str] = mapped_column(String(50), default="ACTIVE")
     status: Mapped[str] = mapped_column(String(50), default="ACTIVE") # Keeping existing status column
     original_amount: Mapped[Optional[float]] = mapped_column(Numeric(10, 2), nullable=True)
