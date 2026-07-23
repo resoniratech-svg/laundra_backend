@@ -205,10 +205,15 @@ class WalletService:
             pkg_hex = str(uuid.uuid4()).replace('-', '')[:12].upper()
             tenant_hex = str(tenant_id).replace('-', '')[:8].upper()
             pass_url = f"/api/v1/wallet/apple/pass/{package_secure_token or serial_number}"
+            now_dt = datetime.datetime.utcnow()
             wallet_pass = WalletPass(
                 tenant_id=tenant_id,
                 customer_id=customer_id,
                 order_id=order_id,
+                created_at=now_dt,
+                updated_at=now_dt,
+                wallet_created_at=now_dt,
+                wallet_updated_at=now_dt,
                 pass_type_identifier=settings.APPLE_WALLET_PASS_TYPE_IDENTIFIER,
                 apple_pass_type_identifier=settings.APPLE_WALLET_PASS_TYPE_IDENTIFIER,
                 serial_number=serial_number,

@@ -163,8 +163,15 @@ try:
         conn.execute(text("UPDATE wallet_passes SET google_class_id = 'GCLASS-LAUNDRA-PASS' WHERE (google_class_id IS NULL OR google_class_id = '');"))
         
         conn.execute(text("UPDATE wallet_passes SET wallet_url = COALESCE(NULLIF(apple_pass_url, ''), NULLIF(qr_url, ''), '/api/v1/wallet/apple/pass/' || id::text) WHERE (wallet_url IS NULL OR wallet_url = '');"))
+# Isolated migration 13 – set DEFAULT NOW() on wallet_passes.created_at & updated_at
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE wallet_passes ALTER COLUMN created_at SET DEFAULT NOW();"))
+        conn.execute(text("ALTER TABLE wallet_passes ALTER COLUMN updated_at SET DEFAULT NOW();"))
+        conn.execute(text("UPDATE wallet_passes SET created_at = NOW() WHERE created_at IS NULL;"))
+        conn.execute(text("UPDATE wallet_passes SET updated_at = NOW() WHERE updated_at IS NULL;"))
 except Exception as e:
-    print(f"[STARTUP WARNING] Migration 12 failed: {e}")
+    print(f"[STARTUP WARNING] Migration 13 failed: {e}")
 try:
     import alembic.config
     import alembic.command
