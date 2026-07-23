@@ -123,6 +123,16 @@ except Exception as e:
 # Isolated migration 11 – wallet_passes table extra columns & customer_packages URL text expansion
 try:
     with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS pass_file_path VARCHAR(500);"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS apple_serial_number VARCHAR(255);"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS apple_pass_type_identifier VARCHAR(255);"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS apple_pass_url TEXT;"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS qr_url TEXT;"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS wallet_status VARCHAR(50) DEFAULT 'ACTIVE';"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS original_amount NUMERIC(10, 2);"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS remaining_balance NUMERIC(10, 2);"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMP WITH TIME ZONE;"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS wallet_created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();"))
         conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS class_id VARCHAR(150);"))
         conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS pass_status VARCHAR(20) DEFAULT 'ACTIVE';"))
         conn.execute(text("ALTER TABLE customer_packages ALTER COLUMN google_wallet_url TYPE TEXT;"))

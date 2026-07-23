@@ -33,6 +33,24 @@ def upgrade() -> None:
         op.create_foreign_key('fk_wallet_passes_tenant_id', 'wallet_passes', 'companies', ['tenant_id'], ['id'], ondelete='CASCADE')
         op.create_index('ix_wallet_passes_tenant_id', 'wallet_passes', ['tenant_id'])
 
+    extra_wallet_cols = [
+        ('pass_file_path', sa.String(500)),
+        ('apple_serial_number', sa.String(255)),
+        ('apple_pass_type_identifier', sa.String(255)),
+        ('apple_pass_url', sa.Text()),
+        ('qr_url', sa.Text()),
+        ('wallet_status', sa.String(50)),
+        ('original_amount', sa.Numeric(10, 2)),
+        ('remaining_balance', sa.Numeric(10, 2)),
+        ('expiry_date', sa.DateTime(timezone=True)),
+        ('wallet_created_at', sa.DateTime(timezone=True)),
+        ('class_id', sa.String(150)),
+        ('pass_status', sa.String(20)),
+    ]
+    for col_name, col_type in extra_wallet_cols:
+        if col_name not in wallet_cols:
+            op.add_column('wallet_passes', sa.Column(col_name, col_type, nullable=True))
+
     # Check and Add applied_package_id to orders
     order_cols = [c['name'] for c in inspector.get_columns('orders')]
     if 'applied_package_id' not in order_cols:
