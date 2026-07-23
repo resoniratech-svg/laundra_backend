@@ -4,6 +4,8 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.logging import logger, sanitize_sensitive_data
+
 class AppException(Exception):
     def __init__(self, message: str, error_code: str, status_code: int = 400):
         super().__init__(message)
@@ -33,25 +35,25 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
-    print("[SQLALCHEMY ERROR DETECTED]")
-    traceback.print_exc()
+    sanitized_msg = sanitize_sensitive_data(str(exc))
+    logger.error(f"[DEBUG DATABASE ERROR] Path: {request.url.path} | Error: {sanitized_msg}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "success": False,
-            "message": f"A database error occurred: {str(exc)}",
+            "message": f"A database error occurred: {sanitized_msg}",
             "error_code": "DATABASE_ERROR"
         }
     )
 
 async def generic_exception_handler(request: Request, exc: Exception):
-    print("[GENERIC EXCEPTION DETECTED]")
-    traceback.print_exc()
+    sanitized_msg = sanitize_sensitive_data(str(exc))
+    logger.error(f"[DEBUG SERVER ERROR] Path: {request.url.path} | Error: {sanitized_msg}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "success": False,
-            "message": f"An unexpected server error occurred: {str(exc)}",
+            "message": f"An unexpected server error occurred: {sanitized_msg}",
             "error_code": "INTERNAL_SERVER_ERROR"
         }
     )

@@ -158,6 +158,8 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(TenantMiddleware)
 
+from app.core.logging import logger, sanitize_sensitive_data
+
 # CORS configuration MUST BE LAST to wrap all other middlewares
 app.add_middleware(
     CORSMiddleware,
@@ -166,8 +168,7 @@ app.add_middleware(
         "https://localhost:5173",
         "http://127.0.0.1:5173",
         "https://laundry-project-laundry-frontend.cocjl5.easypanel.host",
-        settings.FRONTEND_BASE_URL,
-        print(f"[STARTUP] CORS allowed origins: {settings.FRONTEND_BASE_URL}")
+        settings.FRONTEND_BASE_URL
     ],
     allow_credentials=True,
     allow_methods=["*"],
