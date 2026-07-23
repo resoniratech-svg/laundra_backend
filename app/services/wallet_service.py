@@ -103,8 +103,11 @@ class WalletService:
                 status["apple_wallet"] = True
                 
                 logger.info("Apple Wallet URL Saved")
-        except Exception as e:
-            logger.error(f"Error generating Apple Wallet pass for package {package.id}: {e}")
+        except Exception:
+            db.rollback()   # <-- VERY IMPORTANT
+            logger.exception(
+                f"Error generating Apple Wallet pass for package {package.id}"
+            )
             
         try:
             db.commit()

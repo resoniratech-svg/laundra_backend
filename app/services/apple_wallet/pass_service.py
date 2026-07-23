@@ -107,28 +107,39 @@ class PassService:
         return output_file
 
     def generate_pkpass(self, pass_data: LaundryPassData, serial_number: Optional[str] = None) -> Path:
-        """Complete workflow: generate pass.json, images, manifest, signature, and zip into .pkpass."""
         s_num = serial_number or f"PASS-{uuid.uuid4().hex[:8].upper()}"
         filename = f"pass_{s_num}.pkpass"
         output_base = Path(settings.APPLE_WALLET_GENERATED_PATH)
 
-        with temporary_directory(output_base, prefix=s_num) as temp_dir:
-            # 1. Generate pass.json
-            self.output = temp_dir
-            self.generate(pass_data, serial_number=s_num)
+        try:
+            with temporary_directory(output_base, prefix=s_num) as temp_dir:
+                logger.info(f"Temp directory: {temp_dir}")
 
-            # 2. Add Images
-            self.image_service.prepare_pass_images(temp_dir)
+                # 1
+                self.output = temp_dir
+                self.generate(pass_data, serial_number=s_num)
+                logger.info("pass.json generated")
 
-            # 3. Create Manifest
-            manifest_path = ManifestService.create_manifest_file(temp_dir)
+                # 2
+                self.image_service.prepare_pass_images(temp_dir)
+                logger.info("Images copied")
 
-            # 4. Sign Manifest
-            signing_svc = SigningService(temp_dir)
-            signing_svc.sign()
+                # 3
+                ManifestService.create_manifest_file(temp_dir)
+                logger.info("Manifest created")
 
-            # 5. Zip into .pkpass
-            pkg_svc = PackageService(temp_dir)
-            pkpass_file = pkg_svc.package(custom_filename=filename)
+                # 4
+                signing_svc = SigningService(temp_dir)
+                signing_svc.sign()
+                logger.info("Manifest signed")
 
-            return pkpass_file
+                # 5
+                pkg_svc = PackageService(temp_dir)
+                pkpass_file = pkg_svc.package(custom_filename=filename)
+                logger.info(f"PKPASS created: {pkpass_file}")
+
+                return pkpass_file
+
+        except Exception:
+            logger.exception("generate_pkpass FAILED")
+            raise

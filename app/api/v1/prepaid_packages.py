@@ -196,9 +196,12 @@ def purchase_package(
             customer=customer,
             company_name=company_name
         )
+        db.refresh(customer_pkg)
+
     except Exception as e:
+        db.rollback()
         import logging
-        logging.getLogger(__name__).error(f"Unexpected error in wallet orchestration for package {customer_pkg.id}: {e}")
+        logging.getLogger(__name__).error(f"Could not generate wallet pass for package {customer_pkg.id}: {e}")
 
     # 3. Trigger WhatsApp Notification
     if customer:
