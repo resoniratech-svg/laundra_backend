@@ -163,6 +163,9 @@ try:
         conn.execute(text("UPDATE wallet_passes SET google_class_id = 'GCLASS-LAUNDRA-PASS' WHERE (google_class_id IS NULL OR google_class_id = '');"))
         
         conn.execute(text("UPDATE wallet_passes SET wallet_url = COALESCE(NULLIF(apple_pass_url, ''), NULLIF(qr_url, ''), '/api/v1/wallet/apple/pass/' || id::text) WHERE (wallet_url IS NULL OR wallet_url = '');"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 12 failed: {e}")
+
 # Isolated migration 13 – set DEFAULT NOW() on wallet_passes.created_at & updated_at
 try:
     with engine.begin() as conn:
