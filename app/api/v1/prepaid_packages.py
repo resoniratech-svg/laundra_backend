@@ -213,19 +213,47 @@ def purchase_package(
 
 @router.get("/customer/{customer_id}", response_model=List[CustomerPackageResponse])
 def get_customer_packages(
-    customer_id: uuid.UUID,
+    customer_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get all purchased packages for a specific customer"""
+    """Get all purchased packages for a specific customer by UUID, phone, or referral code"""
+    target_user = None
+    try:
+        val_uuid = uuid.UUID(customer_id)
+        target_user = db.query(User).filter(
+            User.id == val_uuid,
+            User.tenant_id == current_user.tenant_id
+        ).first()
+    except Exception:
+        pass
+        
+    if not target_user:
+        target_user = db.query(User).filter(
+            User.tenant_id == current_user.tenant_id,
+            (User.phone == customer_id) | (User.email == customer_id)
+        ).first()
+
+    if not target_user:
+        from app.models.customer import Customer
+        cust_rec = db.query(Customer).filter(
+            Customer.tenant_id == current_user.tenant_id,
+            (Customer.referral_code == customer_id) | (Customer.phone == customer_id)
+        ).first()
+        if cust_rec:
+            target_user = db.query(User).filter(User.id == cust_rec.id).first()
+
+    real_customer_id = target_user.id if target_user else None
+    if not real_customer_id:
+        return []
+
     pkgs = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
-        CustomerPackage.customer_id == customer_id,
+        CustomerPackage.customer_id == real_customer_id,
         CustomerPackage.tenant_id == current_user.tenant_id
     ).order_by(CustomerPackage.purchase_date.desc()).all()
     
     # Auto-update status for expired ones & generate missing wallet URLs before returning
     now = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
-    customer = db.query(User).filter(User.id == customer_id).first()
     company_name = getattr(current_user, 'company', None).name if getattr(current_user, 'company', None) else "Laundra Laundry"
 
     for p in pkgs:
@@ -239,12 +267,12 @@ def get_customer_packages(
                     db.commit()
                     continue
 
-            if not p.apple_wallet_url and customer:
+            if not p.apple_wallet_url and target_user:
                 try:
                     WalletService.create_and_save_wallet_pass(
                         db=db,
                         package=p,
-                        customer=customer,
+                        customer=target_user,
                         company_name=company_name
                     )
                     db.refresh(p)
@@ -252,6 +280,9 @@ def get_customer_packages(
                     import traceback
                     print(f"Could not generate wallet pass on the fly: {e}")
                     print(traceback.format_exc())
+
+            if not p.apple_wallet_url and p.secure_token:
+                p.apple_wallet_url = f"/api/v1/wallet/apple/pass/{p.secure_token}"
 
     return pkgs
 
