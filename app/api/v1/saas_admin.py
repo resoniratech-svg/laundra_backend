@@ -360,10 +360,11 @@ def send_admin_otp(
         
     otp = str(random.randint(100000, 999999))
     MOCK_OTP_STORE[payload.email] = otp
-    print(f"[OTP DEBUG] Generated company admin registration OTP for {payload.email}: {otp}")
-    send_otp_email(db, payload.email, otp)
-    
-    return {"message": "OTP sent successfully to email", "otp_debug": otp}
+    email_sent = send_otp_email(db, payload.email, otp)
+    res = {"message": "OTP sent successfully to email"}
+    if not email_sent:
+        res["otp_debug"] = otp
+    return res
 
 @router.post("/companies/{company_id}/admins", status_code=status.HTTP_201_CREATED)
 def create_company_admin(
