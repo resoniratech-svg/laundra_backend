@@ -73,7 +73,13 @@ class OrderService:
                 id=uuid4(),
                 service_id=service.id,
                 quantity=item.quantity,
-                price=price
+                price=price,
+                ordered_quantity=item.quantity,
+                picked_up_quantity=0,
+                pickup_pending_quantity=item.quantity,
+                delivered_quantity=0,
+                delivery_pending_quantity=0,
+                item_status="CREATED"
             )
             items_to_create.append(order_item)
 

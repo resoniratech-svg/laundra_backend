@@ -33,6 +33,9 @@ class Order(BaseModel):
     review_reply: Mapped[Optional[str]] = mapped_column(String(1000))
     review_hidden: Mapped[bool] = mapped_column(default=False)
 
+    pickup_history: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    delivery_history: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Relationships
     company: Mapped["Company"] = relationship("Company", back_populates="orders")
     customer: Mapped["Customer"] = relationship("Customer", back_populates="orders")

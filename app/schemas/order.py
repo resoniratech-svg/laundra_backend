@@ -15,6 +15,12 @@ class OrderItemOut(OrderItemBase):
     id: UUID
     order_id: UUID
     price: Optional[Decimal] = Decimal('0.0')
+    ordered_quantity: Optional[int] = None
+    picked_up_quantity: Optional[int] = 0
+    pickup_pending_quantity: Optional[int] = None
+    delivered_quantity: Optional[int] = 0
+    delivery_pending_quantity: Optional[int] = 0
+    item_status: Optional[str] = "CREATED"
 
     class Config:
         from_attributes = True
@@ -51,6 +57,8 @@ class OrderOut(OrderBase):
     pickup_date: Optional[datetime] = None
     delivery_date: Optional[datetime] = None
     created_at: datetime
+    pickup_history: Optional[str] = None
+    delivery_history: Optional[str] = None
     items: List[OrderItemOut] = []
 
     class Config:

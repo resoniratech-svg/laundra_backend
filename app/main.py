@@ -175,6 +175,23 @@ try:
         conn.execute(text("UPDATE wallet_passes SET updated_at = NOW() WHERE updated_at IS NULL;"))
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 13 failed: {e}")
+
+# Isolated migration 14 – OrderItem and Order item-level partial pickup & delivery columns
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS ordered_quantity INTEGER;"))
+        conn.execute(text("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS picked_up_quantity INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS pickup_pending_quantity INTEGER;"))
+        conn.execute(text("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS delivered_quantity INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS delivery_pending_quantity INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS item_status VARCHAR(30) DEFAULT 'CREATED';"))
+        conn.execute(text("UPDATE order_items SET ordered_quantity = quantity WHERE ordered_quantity IS NULL;"))
+        conn.execute(text("UPDATE order_items SET pickup_pending_quantity = ordered_quantity - COALESCE(picked_up_quantity, 0) WHERE pickup_pending_quantity IS NULL;"))
+        conn.execute(text("UPDATE order_items SET delivery_pending_quantity = COALESCE(picked_up_quantity, 0) - COALESCE(delivered_quantity, 0) WHERE delivery_pending_quantity IS NULL;"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_history TEXT;"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_history TEXT;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 14 failed: {e}")
 try:
     import alembic.config
     import alembic.command

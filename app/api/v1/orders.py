@@ -363,4 +363,195 @@ def toggle_review_visibility(
     order.items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
     return order
 
+import json
+from datetime import datetime
+
+class ItemQuantityAction(BaseModel):
+    item_id: UUID
+    quantity: int
+
+class PartialActionPayload(BaseModel):
+    items: List[ItemQuantityAction]
+    staff_name: Optional[str] = None
+
+@router.post("/{id}/pickup-items", response_model=OrderOut)
+def pickup_order_items(
+    id: UUID,
+    payload: PartialActionPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    order = db.query(Order).filter(Order.id == id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="No items provided for pickup")
+
+    pickup_logs = []
+    staff_name = payload.staff_name or current_user.name or "Delivery Staff"
+
+    for action_item in payload.items:
+        if action_item.quantity <= 0:
+            continue
+
+        from sqlalchemy import or_
+        item = db.query(OrderItem).filter(
+            or_(OrderItem.id == action_item.item_id, OrderItem.service_id == action_item.item_id),
+            OrderItem.order_id == id
+        ).first()
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Order item {action_item.item_id} not found")
+
+        ordered_qty = item.ordered_quantity if item.ordered_quantity is not None else item.quantity
+        curr_picked = item.picked_up_quantity or 0
+        curr_pending = max(0, ordered_qty - curr_picked)
+
+        if action_item.quantity > curr_pending:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Pickup quantity ({action_item.quantity}) cannot exceed pickup pending quantity ({curr_pending}) for item"
+            )
+
+        new_picked = curr_picked + action_item.quantity
+        item.picked_up_quantity = new_picked
+        item.ordered_quantity = ordered_qty
+        item.pickup_pending_quantity = max(0, ordered_qty - new_picked)
+        item.delivery_pending_quantity = max(0, new_picked - (item.delivered_quantity or 0))
+
+        if new_picked >= ordered_qty:
+            item.item_status = "FULLY_PICKED_UP"
+        else:
+            item.item_status = "PARTIALLY_PICKED_UP"
+
+        from app.models.service import Service
+        service = db.query(Service).filter(Service.id == item.service_id).first()
+        service_name = service.name if service else "Service"
+
+        pickup_logs.append({
+            "item_id": str(item.id),
+            "service_name": service_name,
+            "quantity": action_item.quantity
+        })
+
+    if pickup_logs:
+        history_list = []
+        if order.pickup_history:
+            try:
+                history_list = json.loads(order.pickup_history)
+            except Exception:
+                history_list = []
+        
+        history_list.append({
+            "timestamp": datetime.now().strftime("%Y-%m-%d %I:%M %p"),
+            "staff_name": staff_name,
+            "items": pickup_logs
+        })
+        order.pickup_history = json.dumps(history_list)
+
+    all_items = db.query(OrderItem).filter(OrderItem.order_id == id).all()
+    all_fully_picked = all((i.picked_up_quantity or 0) >= (i.ordered_quantity or i.quantity or 1) for i in all_items)
+    any_picked = any((i.picked_up_quantity or 0) > 0 for i in all_items)
+
+    if all_fully_picked:
+        order.status = "FULLY PICKED UP"
+    elif any_picked:
+        order.status = "PARTIALLY PICKED UP"
+
+    db.commit()
+    db.refresh(order)
+    order.items = all_items
+    return order
+
+@router.post("/{id}/deliver-items", response_model=OrderOut)
+def deliver_order_items(
+    id: UUID,
+    payload: PartialActionPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    order = db.query(Order).filter(Order.id == id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="No items provided for delivery")
+
+    delivery_logs = []
+    staff_name = payload.staff_name or current_user.name or "Delivery Staff"
+
+    for action_item in payload.items:
+        if action_item.quantity <= 0:
+            continue
+
+        from sqlalchemy import or_
+        item = db.query(OrderItem).filter(
+            or_(OrderItem.id == action_item.item_id, OrderItem.service_id == action_item.item_id),
+            OrderItem.order_id == id
+        ).first()
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Order item {action_item.item_id} not found")
+
+        ordered_qty = item.ordered_quantity if item.ordered_quantity is not None else item.quantity
+        curr_picked = item.picked_up_quantity if (item.picked_up_quantity is not None and item.picked_up_quantity > 0) else ordered_qty
+        curr_delivered = item.delivered_quantity or 0
+        curr_delivery_pending = max(0, curr_picked - curr_delivered)
+
+        if action_item.quantity > curr_delivery_pending:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Delivered quantity ({action_item.quantity}) cannot exceed delivery pending quantity ({curr_delivery_pending}) for item"
+            )
+
+        new_delivered = curr_delivered + action_item.quantity
+        item.delivered_quantity = new_delivered
+        item.delivery_pending_quantity = max(0, curr_picked - new_delivered)
+
+        if new_delivered >= ordered_qty:
+            item.item_status = "FULLY_DELIVERED"
+        else:
+            item.item_status = "PARTIALLY_DELIVERED"
+
+        from app.models.service import Service
+        service = db.query(Service).filter(Service.id == item.service_id).first()
+        service_name = service.name if service else "Service"
+
+        delivery_logs.append({
+            "item_id": str(item.id),
+            "service_name": service_name,
+            "quantity": action_item.quantity
+        })
+
+    if delivery_logs:
+        history_list = []
+        if order.delivery_history:
+            try:
+                history_list = json.loads(order.delivery_history)
+            except Exception:
+                history_list = []
+        
+        history_list.append({
+            "timestamp": datetime.now().strftime("%Y-%m-%d %I:%M %p"),
+            "staff_name": staff_name,
+            "items": delivery_logs
+        })
+        order.delivery_history = json.dumps(history_list)
+
+    all_items = db.query(OrderItem).filter(OrderItem.order_id == id).all()
+    all_fully_delivered = all((i.delivered_quantity or 0) >= (i.ordered_quantity or i.quantity or 1) for i in all_items)
+    any_delivered = any((i.delivered_quantity or 0) > 0 for i in all_items)
+    all_fully_picked = all((i.picked_up_quantity or 0) >= (i.ordered_quantity or i.quantity or 1) for i in all_items)
+
+    if all_fully_delivered:
+        order.status = "DELIVERED"
+    elif any_delivered:
+        order.status = "PARTIALLY DELIVERED"
+    elif all_fully_picked:
+        order.status = "FULLY PICKED UP"
+
+    db.commit()
+    db.refresh(order)
+    order.items = all_items
+    return order
+
 
