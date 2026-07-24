@@ -204,6 +204,13 @@ app.add_middleware(TenantMiddleware)
 
 from app.core.logging import logger, sanitize_sensitive_data
 
+try:
+    from seed_super_admin import run as seed_super_admin_run
+    seed_super_admin_run()
+    print("[STARTUP] Superadmin seed check completed.")
+except Exception as e:
+    print(f"[STARTUP WARNING] Superadmin seed failed: {e}")
+
 # CORS configuration MUST BE LAST to wrap all other middlewares
 app.add_middleware(
     CORSMiddleware,
@@ -212,8 +219,10 @@ app.add_middleware(
         "https://localhost:5173",
         "http://127.0.0.1:5173",
         "https://laundry-project-laundry-frontend.cocjl5.easypanel.host",
+        "https://laundra-test-laundry-frontend-test.cocjl5.easypanel.host",
         settings.FRONTEND_BASE_URL
     ],
+    allow_origin_regex=r"https://.*\.easypanel\.host|http://localhost:.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
