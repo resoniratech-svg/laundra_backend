@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
+from typing import Optional
 import uuid
 import datetime
 
@@ -12,9 +13,10 @@ class PackageUsageHistory(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("companies.id"), nullable=False)
     customer_package_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("customer_packages.id"), nullable=False)
-    order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id"), nullable=False)
+    order_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("orders.id"), nullable=True)
     
-    quantity_used: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity_used: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    remarks: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     transaction_date: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=datetime.datetime.utcnow)
 
     company = relationship("Company")

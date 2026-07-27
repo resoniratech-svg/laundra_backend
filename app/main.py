@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -247,6 +248,146 @@ app.add_middleware(
 
 app.include_router(router)
 
+@app.get("/verify/pass/{serial_number}")
+def public_verify_pass(
+    serial_number: str,
+    token: Optional[str] = None,
+    format: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    from app.models.wallet_pass import WalletPass
+    from app.models.customer_package import CustomerPackage
+    from app.models.user import User
+    from app.services.wallet_service import WalletService
+    from fastapi.responses import HTMLResponse, FileResponse
+    from pathlib import Path
+    import uuid
+
+    # Look up by serial number, authentication token, or ID
+    pass_rec = db.query(WalletPass).filter(
+        (WalletPass.serial_number == serial_number) |
+        (WalletPass.apple_serial_number == serial_number) |
+        (WalletPass.authentication_token == token)
+    ).first()
+
+    cp = None
+    if pass_rec and pass_rec.customer_package_id:
+        cp = db.query(CustomerPackage).filter(CustomerPackage.id == pass_rec.customer_package_id).first()
+
+    if not cp:
+        # Fallback search by secure token or package id
+        try:
+            val_uuid = uuid.UUID(serial_number)
+            cp = db.query(CustomerPackage).filter(CustomerPackage.id == val_uuid).first()
+        except Exception:
+            pass
+        if not cp:
+            cp = db.query(CustomerPackage).filter(CustomerPackage.secure_token == serial_number).first()
+
+    if not cp:
+        raise HTTPException(status_code=404, detail="Pass or Customer Package not found")
+
+    if not pass_rec:
+        pass_rec = db.query(WalletPass).filter(WalletPass.customer_package_id == cp.id).first()
+
+    customer = db.query(User).filter(User.id == cp.customer_id).first()
+    
+    # Auto-refresh pass file on disk
+    try:
+        WalletService.update_wallet_pass_on_usage(db, cp, customer)
+    except Exception as e:
+        pass
+
+    # If requested format is pkpass or download parameter is true
+    if format == "pkpass" or token == "pkpass":
+        if pass_rec and pass_rec.pass_file_path and Path(pass_rec.pass_file_path).exists():
+            return FileResponse(
+                path=Path(pass_rec.pass_file_path),
+                media_type="application/vnd.apple.pkpass",
+                filename=f"package_{cp.secure_token[:8]}.pkpass"
+            )
+
+    cust_name = customer.name if customer else "Member"
+    pkg_name = cp.package.name if hasattr(cp, 'package') and cp.package else "Prepaid Package"
+    bal_val = f"QR {float(cp.current_balance or 0.0):.2f}"
+    exp_date = cp.expiry_date.strftime("%Y-%m-%d") if (cp.expiry_date and hasattr(cp.expiry_date, 'strftime')) else str(cp.expiry_date or "N/A")
+    status_str = cp.status or "ACTIVE"
+
+    # Services breakdown
+    service_items = cp.service_items or []
+    services_html = ""
+    if service_items:
+        for si in service_items:
+            s_name = si.get("service", "Service")
+            s_left = si.get("left", 0)
+            s_total = si.get("total", 0)
+            percent = int((s_left / s_total * 100)) if s_total > 0 else 0
+            bar_color = "#16a34a" if percent > 50 else ("#d97706" if percent > 20 else "#dc2626")
+            services_html += f"""
+            <div style="margin-bottom: 14px;">
+              <div style="display:flex; justify-content:space-between; font-size:14px; font-weight:700; color:#334155; margin-bottom:6px;">
+                <span>{s_name}</span>
+                <span>{s_left} / {s_total} Pcs</span>
+              </div>
+              <div style="height:10px; background:#e2e8f0; border-radius:5px; overflow:hidden;">
+                <div style="width:{percent}%; height:100%; background:{bar_color}; border-radius:5px;"></div>
+              </div>
+            </div>
+            """
+    else:
+        services_html = "<div style='color:#64748b; font-size:14px;'>Package services active</div>"
+
+    download_link = f"/api/v1/wallet/apple/pass/{cp.secure_token}"
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>{cust_name} - Laundry Pass</title>
+      <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 90vh; }}
+        .card {{ background: white; max-width: 420px; width: 100%; border-radius: 20px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.05); overflow: hidden; border: 1px solid #e2e8f0; }}
+        .header {{ background: linear-gradient(135deg, #eab308, #ca8a04); padding: 24px; color: white; text-align: center; }}
+        .header.in_use {{ background: linear-gradient(135deg, #64748b, #475569); }}
+        .header.completed {{ background: linear-gradient(135deg, #94a3b8, #64748b); }}
+        .badge {{ display: inline-block; padding: 4px 12px; background: rgba(255,255,255,0.25); border-radius: 20px; font-size: 12px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; margin-top: 6px; }}
+        .content {{ padding: 24px; }}
+        .btn {{ display: block; width: 100%; padding: 14px; background: #000; color: white; text-align: center; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 16px; margin-top: 20px; box-sizing: border-box; transition: background 0.2s; }}
+        .btn:hover {{ background: #1e293b; }}
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="header {'in_use' if status_str == 'IN_USE' else ('completed' if status_str == 'COMPLETED' else '')}">
+          <div style="font-size: 13px; opacity: 0.9; text-transform: uppercase; letter-spacing: 1px; font-weight: 700;">Dry Cleaners Official Pass</div>
+          <h2 style="margin: 6px 0 0 0; font-size: 24px; font-weight: 800;">{pkg_name}</h2>
+          <div class="badge">{status_str}</div>
+        </div>
+        <div class="content">
+          <div style="margin-bottom: 20px; border-bottom: 1px solid #f1f5f9; padding-bottom: 16px;">
+            <div style="font-size: 12px; color: #64748b; font-weight: 700; text-transform: uppercase;">Customer Name</div>
+            <div style="font-size: 20px; font-weight: 800; color: #0f172a; margin-top: 2px;">{cust_name}</div>
+          </div>
+          
+          <div style="margin-bottom: 20px;">
+            <div style="font-size: 12px; color: #64748b; font-weight: 700; text-transform: uppercase; margin-bottom: 12px;">Included Service Balances</div>
+            {services_html}
+          </div>
+
+          <div style="display: flex; justify-content: space-between; font-size: 13px; color: #64748b; padding: 12px; background: #f8fafc; border-radius: 10px;">
+            <div>Wallet Balance: <strong style="color: #0f172a;">{bal_val}</strong></div>
+            <div>Expires: <strong style="color: #0f172a;">{exp_date}</strong></div>
+          </div>
+
+          <a href="{download_link}" class="btn">📲 Add to Apple Wallet / Download Pass</a>
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
 
 @app.get("/")
 def home():

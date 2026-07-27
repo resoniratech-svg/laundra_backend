@@ -57,12 +57,27 @@ class WalletPassModel(BaseModel):
     boardingPass: Optional[PassStructure] = None
 
 class LaundryPassData(BaseModel):
+    company_name: Optional[str] = "Dry Cleaners"
     customer_name: str
     package_name: str
     package_id: str
     remaining_balance: str
     expiry_date: str
     qr_data: str
+    status: Optional[str] = "ACTIVE"
+    member_since: Optional[str] = "2026"
+    coupon_cost: Optional[str] = "QR 0.00"
+    # Dynamic service items — works with ANY service type
+    service_items: Optional[List[dict]] = []  # [{"service": "Wash & Press", "total": 10, "left": 8}, ...]
+    # Legacy fixed fields (backward compat, defaults to 0 instead of hardcoded values)
+    wash_left: Optional[int] = 0
+    wash_total: Optional[int] = 0
+    iron_left: Optional[int] = 0
+    iron_total: Optional[int] = 0
+    dry_left: Optional[int] = 0
+    dry_total: Optional[int] = 0
+    steam_left: Optional[int] = 0
+    steam_total: Optional[int] = 0
 
 class PassGenerationRequest(BaseModel):
     customer_id: UUID

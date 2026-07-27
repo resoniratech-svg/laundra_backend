@@ -115,6 +115,59 @@ def delete_prepaid_package(
     return {"message": "Package deleted successfully"}
 
 from app.schemas.prepaid_package import CustomerPackageResponse, WalletGenerationStatus
+from app.models.service import Service
+
+def resolve_service_items_from_package(db: Session, pkg: PrepaidPackage) -> list:
+    """
+    Resolves eligible_services (which contain Service UUIDs or category dicts)
+    into a grouped list of dynamic service items with exact names/categories.
+    """
+    if not pkg or not pkg.eligible_services or not isinstance(pkg.eligible_services, list):
+        return []
+
+    cat_totals = {}  # category_name -> quantity
+
+    for item in pkg.eligible_services:
+        svc_id = None
+        qty = 1
+        explicit_cat = None
+
+        if isinstance(item, dict):
+            svc_id = item.get("id") or item.get("service_id") or item.get("serviceId")
+            qty = int(item.get("qty") or item.get("quantity") or 1)
+            explicit_cat = item.get("category") or item.get("service") or item.get("name")
+        elif isinstance(item, str):
+            svc_id = item
+            qty = 1
+
+        resolved_cat = None
+        # If explicit category string is provided and is not a UUID
+        if explicit_cat and isinstance(explicit_cat, str) and not explicit_cat.startswith("0") and len(explicit_cat) < 40 and "-" not in explicit_cat:
+            resolved_cat = explicit_cat.strip()
+        elif svc_id:
+            try:
+                val_uuid = uuid.UUID(str(svc_id))
+                svc = db.query(Service).filter(Service.id == val_uuid).first()
+                if svc:
+                    resolved_cat = (svc.category or svc.name or "Service").strip()
+            except Exception:
+                pass
+
+        if not resolved_cat:
+            resolved_cat = "General Laundry"
+
+        cat_totals[resolved_cat] = cat_totals.get(resolved_cat, 0) + qty
+
+    result = []
+    for cat_name, total_qty in cat_totals.items():
+        if total_qty > 0:
+            result.append({
+                "service": cat_name,
+                "total": total_qty,
+                "left": total_qty
+            })
+
+    return result
 
 @router.post("/purchase", response_model=CustomerPackageResponse, status_code=201)
 def purchase_package(
@@ -160,9 +213,28 @@ def purchase_package(
             else:
                 discount = 0.0
             final_price = max(0.0, final_price - discount)
-    
+
     # 1. Save CustomerPackage Purchase (Wallet balance is the full original package value)
     full_pkg_value = float(pkg.original_price) if pkg.original_price and float(pkg.original_price) > 0 else float(pkg.offer_price)
+
+    # Build dynamic service_items from the package's eligible_services
+    dynamic_service_items = resolve_service_items_from_package(db, pkg)
+
+    # Also populate legacy fixed columns for backward compat
+    w_tot, i_tot, d_tot, s_tot = 0, 0, 0, 0
+    for si in dynamic_service_items:
+        cat = si["service"].lower()
+        if "steam" in cat:
+            s_tot += si["total"]
+        elif "wash" in cat or "fold" in cat:
+            w_tot += si["total"]
+        elif "press" in cat or "iron" in cat:
+            i_tot += si["total"]
+        elif "dry" in cat or "premium" in cat:
+            d_tot += si["total"]
+        else:
+            w_tot += si["total"]
+
     customer_pkg = CustomerPackage(
         id=uuid.uuid4(),
         tenant_id=current_user.tenant_id,
@@ -177,11 +249,61 @@ def purchase_package(
         current_balance=full_pkg_value,
         used_amount=0.0,
         pass_color="GOLD",
-        status="ACTIVE"
+        status="ACTIVE",
+        wash_total=w_tot,
+        wash_left=w_tot,
+        iron_total=i_tot,
+        iron_left=i_tot,
+        dry_total=d_tot,
+        dry_left=d_tot,
+        steam_total=s_tot,
+        steam_left=s_tot,
+        service_items=dynamic_service_items
     )
     db.add(customer_pkg)
     db.commit()
     db.refresh(customer_pkg)
+    
+    # Record Order in Order History for Package Purchase
+    try:
+        from app.models.order import Order, OrderItem
+        from datetime import datetime
+        new_order_id = uuid.uuid4()
+        now_time = datetime.utcnow()
+        ord_num = f"ORD-PKG-{now_time.strftime('%Y%m%d')}-{str(new_order_id)[:4].upper()}"
+        
+        new_order = Order(
+            id=new_order_id,
+            tenant_id=current_user.tenant_id,
+            customer_id=payload.customer_id,
+            order_number=ord_num,
+            status="COMPLETED",
+            payment_status="PAID",
+            payment_method=payload.payment_method or "CASH",
+            subtotal=Decimal(str(final_price)),
+            discount_amount=Decimal(str(discount_amount)),
+            total_amount=Decimal(str(final_price)),
+            notes=f"Purchased Prepaid Package: {pkg.name}",
+            order_type="PACKAGE_PURCHASE",
+            created_at=now_time,
+            updated_at=now_time
+        )
+        db.add(new_order)
+        db.flush()
+        
+        new_item = OrderItem(
+            id=uuid.uuid4(),
+            order_id=new_order_id,
+            item_name=f"Prepaid Package - {pkg.name}",
+            quantity=1,
+            unit_price=Decimal(str(final_price)),
+            total_price=Decimal(str(final_price))
+        )
+        db.add(new_item)
+        db.commit()
+    except Exception as e_ord:
+        import logging
+        logging.getLogger(__name__).error(f"Could not record order for package purchase: {e_ord}")
     
     customer_pkg = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(CustomerPackage.id == customer_pkg.id).first()
     customer = db.query(User).filter(User.id == payload.customer_id).first()
@@ -213,6 +335,255 @@ def purchase_package(
         
     setattr(customer_pkg, "wallet_generation", wallet_status)
     return customer_pkg
+
+from app.schemas.prepaid_package import CustomerPackageDeductRequest
+
+@router.get("/customer/{customer_id}/active", response_model=CustomerPackageResponse)
+def get_active_customer_package(
+    customer_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Fetch the single active CustomerPackage record for a customer as the single source of truth"""
+    target_user = None
+    try:
+        val_uuid = uuid.UUID(customer_id)
+        target_user = db.query(User).filter(
+            User.id == val_uuid,
+            User.tenant_id == current_user.tenant_id
+        ).first()
+    except Exception:
+        pass
+        
+    if not target_user:
+        target_user = db.query(User).filter(
+            User.tenant_id == current_user.tenant_id,
+            (User.phone == customer_id) | (User.email == customer_id)
+        ).first()
+
+    real_customer_id = target_user.id if target_user else None
+    if not real_customer_id:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    cp = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
+        CustomerPackage.customer_id == real_customer_id,
+        CustomerPackage.tenant_id == current_user.tenant_id,
+        CustomerPackage.status.in_(["ACTIVE", "IN_USE"])
+    ).order_by(CustomerPackage.purchase_date.desc()).first()
+
+    if not cp:
+        cp = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
+            CustomerPackage.customer_id == real_customer_id,
+            CustomerPackage.tenant_id == current_user.tenant_id
+        ).order_by(CustomerPackage.purchase_date.desc()).first()
+
+    if not cp:
+        raise HTTPException(status_code=404, detail="No active package found for customer")
+
+    # Auto-fix missing service_items for existing packages
+    if cp and (not cp.service_items or len(cp.service_items) == 0):
+        resolved = resolve_service_items_from_package(db, cp.package)
+        if resolved:
+            from sqlalchemy.orm.attributes import flag_modified
+            cp.service_items = resolved
+            flag_modified(cp, "service_items")
+            db.commit()
+            db.refresh(cp)
+
+    return cp
+
+@router.post("/deduct", response_model=CustomerPackageResponse)
+def deduct_package_usage(
+    payload: CustomerPackageDeductRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Deduct package usage from CustomerPackage database record and trigger Apple Wallet OTA update"""
+    cp = None
+    if payload.customer_package_id:
+        cp = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
+            CustomerPackage.id == payload.customer_package_id,
+            CustomerPackage.tenant_id == current_user.tenant_id
+        ).first()
+
+    if not cp and payload.customer_id:
+        cp = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
+            CustomerPackage.customer_id == payload.customer_id,
+            CustomerPackage.tenant_id == current_user.tenant_id,
+            CustomerPackage.status.in_(["ACTIVE", "IN_USE"])
+        ).order_by(CustomerPackage.purchase_date.desc()).first()
+
+    if not cp:
+        raise HTTPException(status_code=404, detail="Active customer package not found")
+
+    # --- Dynamic service_items deduction (primary path) ---
+    current_items = list(cp.service_items or [])
+    a_used = payload.amount_used or 0.0
+    c_bal = float(cp.current_balance or 0.0)
+
+    if a_used > c_bal:
+        raise HTTPException(status_code=400, detail=f"Cannot deduct QR {a_used:.2f}. Wallet balance is QR {c_bal:.2f}.")
+
+    # If dynamic deductions are provided, use them (primary path)
+    if payload.deductions and len(payload.deductions) > 0:
+        for ded in payload.deductions:
+            if ded.quantity <= 0:
+                continue
+            # Find the matching service in service_items
+            found = False
+            for si in current_items:
+                if si["service"].lower() == ded.service.lower():
+                    found = True
+                    if ded.quantity > si["left"]:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Cannot deduct {ded.quantity} {ded.service}. Only {si['left']} remaining."
+                        )
+                    si["left"] = max(0, si["left"] - ded.quantity)
+                    break
+            if not found:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Service '{ded.service}' not found in this customer's package."
+                )
+    else:
+        # Legacy fixed-field deductions (backward compat)
+        w_used = payload.wash_used or 0
+        i_used = payload.iron_used or 0
+        d_used = payload.dry_used or 0
+        s_used = payload.steam_used or 0
+
+        if w_used > 0 or i_used > 0 or d_used > 0 or s_used > 0:
+            # Map legacy fields to service_items
+            legacy_map = {
+                "wash": w_used, "iron": i_used, "dry": d_used, "steam": s_used
+            }
+            for si in current_items:
+                cat = si["service"].lower()
+                deduct_qty = 0
+                if ("wash" in cat or "fold" in cat) and legacy_map["wash"] > 0:
+                    deduct_qty = legacy_map["wash"]
+                    legacy_map["wash"] = 0
+                elif ("press" in cat or "iron" in cat) and "steam" not in cat and legacy_map["iron"] > 0:
+                    deduct_qty = legacy_map["iron"]
+                    legacy_map["iron"] = 0
+                elif ("dry" in cat or "premium" in cat) and legacy_map["dry"] > 0:
+                    deduct_qty = legacy_map["dry"]
+                    legacy_map["dry"] = 0
+                elif "steam" in cat and legacy_map["steam"] > 0:
+                    deduct_qty = legacy_map["steam"]
+                    legacy_map["steam"] = 0
+
+                if deduct_qty > 0:
+                    if deduct_qty > si["left"]:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Cannot deduct {deduct_qty} {si['service']}. Only {si['left']} remaining."
+                        )
+                    si["left"] = max(0, si["left"] - deduct_qty)
+
+    # Check if any deduction was actually made
+    total_deducted = 0
+    if payload.deductions and len(payload.deductions) > 0:
+        total_deducted = sum(d.quantity for d in payload.deductions if d.quantity > 0)
+    else:
+        total_deducted = (payload.wash_used or 0) + (payload.iron_used or 0) + (payload.dry_used or 0) + (payload.steam_used or 0)
+
+    if total_deducted <= 0 and a_used <= 0:
+        raise HTTPException(status_code=400, detail="Please enter at least one deduction quantity or wallet amount.")
+
+    # Persist updated service_items back
+    from sqlalchemy.orm.attributes import flag_modified
+    cp.service_items = current_items
+    flag_modified(cp, "service_items")
+
+    # Sync legacy fixed columns from service_items
+    w_left, i_left, d_left, s_left = 0, 0, 0, 0
+    w_tot, i_tot, d_tot, s_tot = 0, 0, 0, 0
+    for si in current_items:
+        cat = si["service"].lower()
+        if "steam" in cat:
+            s_left += si["left"]; s_tot += si["total"]
+        elif "wash" in cat or "fold" in cat:
+            w_left += si["left"]; w_tot += si["total"]
+        elif ("press" in cat or "iron" in cat):
+            i_left += si["left"]; i_tot += si["total"]
+        elif "dry" in cat or "premium" in cat:
+            d_left += si["left"]; d_tot += si["total"]
+        else:
+            w_left += si["left"]; w_tot += si["total"]
+
+    cp.wash_left = w_left; cp.wash_total = w_tot
+    cp.iron_left = i_left; cp.iron_total = i_tot
+    cp.dry_left = d_left; cp.dry_total = d_tot
+    cp.steam_left = s_left; cp.steam_total = s_tot
+
+    # Deduct wallet amount
+    cp.current_balance = max(0.0, c_bal - a_used)
+    cp.used_amount = float(cp.used_amount or 0.0) + a_used
+
+    # Determine status
+    total_left = sum(si["left"] for si in current_items)
+    if total_left <= 0:
+        cp.status = "COMPLETED"
+        cp.pass_color = "WHITE"
+    else:
+        cp.status = "IN_USE"
+        cp.pass_color = "GREY"
+
+    db.commit()
+    db.refresh(cp)
+
+    # Record PackageUsageHistory audit tracking
+    try:
+        from datetime import datetime
+        deducted_summary = []
+        if payload.deductions:
+            for d in payload.deductions:
+                if d.quantity > 0:
+                    deducted_summary.append(f"{d.quantity}x {d.service}")
+        if a_used > 0:
+            deducted_summary.append(f"QR {a_used:.2f} Wallet")
+            
+        desc_str = ", ".join(deducted_summary) if deducted_summary else "Package Deduction"
+        
+        audit_hist = PackageUsageHistory(
+            id=uuid.uuid4(),
+            tenant_id=current_user.tenant_id,
+            customer_package_id=cp.id,
+            quantity_used=total_deducted,
+            remarks=payload.remarks or desc_str,
+            transaction_date=datetime.utcnow()
+        )
+        db.add(audit_hist)
+        db.commit()
+    except Exception as e_hist:
+        import logging
+        logging.getLogger(__name__).error(f"Error logging PackageUsageHistory: {e_hist}")
+
+    # Regenerate Pass & APNs push
+    customer = db.query(User).filter(User.id == cp.customer_id).first()
+    try:
+        WalletService.update_wallet_pass_on_usage(db, cp, customer)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error updating wallet pass on usage: {e}")
+
+    return cp
+
+@router.get("/customer-packages/all", response_model=List[CustomerPackageResponse])
+def get_all_tenant_customer_packages(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all purchased CustomerPackage records for the current tenant"""
+    pkgs = db.query(CustomerPackage).options(
+        joinedload(CustomerPackage.package),
+        joinedload(CustomerPackage.customer)
+    ).filter(
+        CustomerPackage.tenant_id == current_user.tenant_id
+    ).order_by(CustomerPackage.purchase_date.desc()).all()
+    return pkgs
 
 @router.get("/customer/{customer_id}", response_model=List[CustomerPackageResponse])
 def get_customer_packages(

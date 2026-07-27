@@ -156,11 +156,12 @@ class OrderService:
             order.paid_amount = final_amount
             order.payment_status = "PAID"
             
-            # Here we would normally trigger a background task to update Google/Apple Wallet API
-            # Since this is a mock architecture, we just log it.
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"WALLET UPDATED: Card color is now {pkg.pass_color} with balance {pkg.current_balance}")
+            # Automatically update & regenerate Apple Wallet PKPass
+            try:
+                WalletService.update_wallet_pass_on_usage(db, pkg, customer)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to auto-update wallet pass on order completion: {e}")
 
 
         # 5. Save items

@@ -1,5 +1,6 @@
 import traceback
 import uuid
+import datetime
 import logging
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -40,7 +41,18 @@ class WalletService:
         bal_str = f"QR {float(package.current_balance or package.package_value or 0.0):.2f}"
 
         try:
-            wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
+            wallet_pass = None
+            if package.customer_id:
+                wallet_pass = (
+                    db.query(WalletPass)
+                    .filter(WalletPass.customer_id == package.customer_id)
+                    .order_by(WalletPass.created_at.desc())
+                    .first()
+                )
+
+            if not wallet_pass:
+                wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
+
             pkg_hex = str(package.id).replace('-', '')[:12].upper()
             tenant_hex = str(package.tenant_id).replace('-', '')[:8].upper()
             serial_str = f"PASS-{pkg_hex[:8]}"
@@ -69,6 +81,10 @@ class WalletService:
                 db.add(wallet_pass)
                 db.flush()
             else:
+                wallet_pass.customer_package_id = package.id
+                wallet_pass.remaining_balance = float(package.current_balance or package.package_value or 0.0)
+                wallet_pass.expiry_date = package.expiry_date
+                wallet_pass.status = package.status or "ACTIVE"
                 if not wallet_pass.wallet_object_id:
                     wallet_pass.wallet_object_id = f"OBJ-{pkg_hex}"
                 if not wallet_pass.class_id:
@@ -90,7 +106,8 @@ class WalletService:
             if not wallet_pass.qr_token:
                 serial_number = wallet_pass.apple_serial_number or f"PASS-{uuid.uuid4().hex[:8].upper()}"
                 auth_token = wallet_pass.authentication_token or uuid.uuid4().hex
-                wallet_pass.qr_token = f"https://laundry.example.com/verify/pass/{serial_number}?token={auth_token}"
+                base_backend = getattr(settings, "BACKEND_BASE_URL", "https://laundry-project-laundry-backend.cocjl5.easypanel.host").rstrip("/")
+                wallet_pass.qr_token = f"{base_backend}/verify/pass/{serial_number}?token={auth_token}"
                 wallet_pass.apple_serial_number = serial_number
                 wallet_pass.authentication_token = auth_token
                 wallet_pass.serial_number = serial_number
@@ -116,7 +133,8 @@ class WalletService:
                 remaining_balance=bal_str,
                 expiry_date=exp_str,
                 wallet_pass=wallet_pass,
-                package_secure_token=package.secure_token
+                package_secure_token=package.secure_token,
+                package_obj=package
             )
             if apple_res and apple_res.get("download_url"):
                 logger.info("Apple Wallet Generated Successfully")
@@ -149,15 +167,32 @@ class WalletService:
         customer: Optional[User] = None
     ):
         """
-        Phase 11: Automatic Wallet Updates when balance/washes decrease or status changes.
+        Automatic Wallet Updates when balance/washes decrease, package is renewed, or status changes.
+        Regenerates PKPass with dynamic card theme.
         """
         try:
             cust_name = customer.name if customer else "Customer"
-            
             wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
+            
+            exp_str = package.expiry_date.strftime('%Y-%m-%d') if (package.expiry_date and hasattr(package.expiry_date, 'strftime')) else str(package.expiry_date or "N/A")
+            bal_str = f"QR {float(package.current_balance or package.package_value or 0.0):.2f}"
+            pkg_title = package.package.name if hasattr(package, 'package') and package.package else "Prepaid Package"
+
             if wallet_pass:
                 wallet_pass.pass_status = package.status or "ACTIVE"
-            
+
+            WalletService.generate_real_apple_wallet_pass(
+                db=db,
+                tenant_id=package.tenant_id,
+                customer_id=package.customer_id,
+                customer_name=cust_name,
+                package_name=pkg_title,
+                remaining_balance=bal_str,
+                expiry_date=exp_str,
+                wallet_pass=wallet_pass,
+                package_secure_token=package.secure_token,
+                package_obj=package
+            )
             db.commit()
         except Exception as e:
             logger.error(f"Error updating wallet pass for package {package.id}: {e}")
@@ -179,15 +214,55 @@ class WalletService:
         expiry_date: Optional[str] = None,
         order_id: Optional[uuid.UUID] = None,
         wallet_pass: Optional['WalletPass'] = None,
-        package_secure_token: Optional[str] = None
+        package_secure_token: Optional[str] = None,
+        package_obj: Optional[CustomerPackage] = None
     ) -> dict:
         from app.services.apple_wallet.pass_service import PassService
         from app.schemas.apple_wallet import LaundryPassData
         from app.models.wallet_pass import WalletPass
 
-        serial_number = wallet_pass.apple_serial_number if wallet_pass and wallet_pass.apple_serial_number else f"PASS-{uuid.uuid4().hex[:8].upper()}"
+        # Ensure deterministic serial_number & pass identity based on CustomerPackage ID
+        if package_obj:
+            pkg_hex = str(package_obj.id).replace('-', '').upper()[:12]
+        elif wallet_pass and wallet_pass.customer_package_id:
+            pkg_hex = str(wallet_pass.customer_package_id).replace('-', '').upper()[:12]
+        else:
+            pkg_hex = uuid.uuid4().hex[:12].upper()
+
+        if not wallet_pass and package_obj:
+            wallet_pass = db.query(WalletPass).filter(
+                (WalletPass.customer_package_id == package_obj.id) |
+                (WalletPass.wallet_object_id == f"OBJ-{pkg_hex}") |
+                (WalletPass.google_object_id == f"GOBJ-{pkg_hex}")
+            ).first()
+
+        if package_obj:
+            pkg_hex = str(package_obj.id).replace('-', '').upper()[:12]
+            serial_number = f"PASS-{pkg_hex}"
+        elif wallet_pass and wallet_pass.apple_serial_number:
+            serial_number = wallet_pass.apple_serial_number
+        else:
+            serial_number = f"PASS-{uuid.uuid4().hex[:8].upper()}"
+
         auth_token = wallet_pass.authentication_token if wallet_pass and wallet_pass.authentication_token else uuid.uuid4().hex
-        qr_token = wallet_pass.qr_token if wallet_pass and wallet_pass.qr_token else f"https://laundry.example.com/verify/pass/{serial_number}?token={auth_token}"
+        base_backend = getattr(settings, "BACKEND_BASE_URL", "https://laundry-project-laundry-backend.cocjl5.easypanel.host").rstrip("/")
+        qr_token = wallet_pass.qr_token if wallet_pass and wallet_pass.qr_token else f"{base_backend}/verify/pass/{serial_number}?token={auth_token}"
+
+        w_left = getattr(package_obj, "wash_left", 0) if package_obj else 0
+        w_total = getattr(package_obj, "wash_total", 0) if package_obj else 0
+        i_left = getattr(package_obj, "iron_left", 0) if package_obj else 0
+        i_total = getattr(package_obj, "iron_total", 0) if package_obj else 0
+        d_left = getattr(package_obj, "dry_left", 0) if package_obj else 0
+        d_total = getattr(package_obj, "dry_total", 0) if package_obj else 0
+        s_left = getattr(package_obj, "steam_left", 0) if package_obj else 0
+        s_total = getattr(package_obj, "steam_total", 0) if package_obj else 0
+
+        c_cost = "QR 0.00"
+        if package_obj and hasattr(package_obj, 'package') and package_obj.package:
+            price_val = float(package_obj.package.offer_price or package_obj.package.original_price or 0.0)
+            c_cost = f"QR {price_val:.2f}"
+        elif package_obj and package_obj.package_value:
+            c_cost = f"QR {float(package_obj.package_value):.2f}"
 
         pass_data = LaundryPassData(
             customer_name=customer_name,
@@ -195,20 +270,34 @@ class WalletService:
             package_id=str(order_id or serial_number),
             remaining_balance=remaining_balance,
             expiry_date=expiry_date or "N/A",
-            qr_data=qr_token
+            qr_data=qr_token,
+            coupon_cost=c_cost,
+            status=package_obj.status if package_obj and package_obj.status else "ACTIVE",
+            service_items=getattr(package_obj, "service_items", []) or [],
+            wash_left=w_left,
+            wash_total=w_total,
+            iron_left=i_left,
+            iron_total=i_total,
+            dry_left=d_left,
+            dry_total=d_total,
+            steam_left=s_left,
+            steam_total=s_total
         )
 
         pass_service = PassService()
         pkpass_path = pass_service.generate_pkpass(pass_data, serial_number=serial_number)
 
+        pass_sec_token = package_secure_token or (package_obj.secure_token if package_obj else None) or serial_number
+        pass_url = f"/api/v1/wallet/apple/pass/{pass_sec_token}"
+        pkg_hex = str(package_obj.id if package_obj else (wallet_pass.customer_package_id if wallet_pass else uuid.uuid4())).replace('-', '').upper()[:12]
+        tenant_hex = str(tenant_id).replace('-', '').upper()[:8]
+
         if not wallet_pass:
-            pkg_hex = str(uuid.uuid4()).replace('-', '')[:12].upper()
-            tenant_hex = str(tenant_id).replace('-', '')[:8].upper()
-            pass_url = f"/api/v1/wallet/apple/pass/{package_secure_token or serial_number}"
             now_dt = datetime.datetime.utcnow()
             wallet_pass = WalletPass(
                 tenant_id=tenant_id,
                 customer_id=customer_id,
+                customer_package_id=package_obj.id if package_obj else None,
                 order_id=order_id,
                 created_at=now_dt,
                 updated_at=now_dt,
@@ -234,23 +323,13 @@ class WalletService:
             db.commit()
             db.refresh(wallet_pass)
         else:
-            pkg_hex = str(wallet_pass.customer_package_id or wallet_pass.id).replace('-', '')[:12].upper()
-            tenant_hex = str(tenant_id).replace('-', '')[:8].upper()
-            pass_url = f"/api/v1/wallet/apple/pass/{package_secure_token or wallet_pass.customer_package_id or serial_number}"
+            wallet_pass.wallet_object_id = f"OBJ-{pkg_hex}"
+            wallet_pass.google_object_id = f"GOBJ-{pkg_hex}"
+            wallet_pass.class_id = f"CLASS-LAUNDRA-{tenant_hex}"
+            wallet_pass.google_class_id = f"GCLASS-LAUNDRA-{tenant_hex}"
 
-            if not wallet_pass.wallet_object_id:
-                wallet_pass.wallet_object_id = f"OBJ-{pkg_hex}"
-            if not wallet_pass.google_object_id:
-                wallet_pass.google_object_id = f"GOBJ-{pkg_hex}"
-            if not wallet_pass.class_id:
-                wallet_pass.class_id = f"CLASS-LAUNDRA-{tenant_hex}"
-            if not wallet_pass.google_class_id:
-                wallet_pass.google_class_id = f"GCLASS-LAUNDRA-{tenant_hex}"
-            if not wallet_pass.wallet_url:
-                wallet_pass.wallet_url = pass_url
-            if not wallet_pass.apple_pass_url:
-                wallet_pass.apple_pass_url = pass_url
-
+            wallet_pass.wallet_url = pass_url
+            wallet_pass.apple_pass_url = pass_url
             wallet_pass.pass_type_identifier = settings.APPLE_WALLET_PASS_TYPE_IDENTIFIER
             wallet_pass.apple_pass_type_identifier = settings.APPLE_WALLET_PASS_TYPE_IDENTIFIER
             wallet_pass.serial_number = serial_number
@@ -258,9 +337,7 @@ class WalletService:
             wallet_pass.authentication_token = auth_token
             wallet_pass.qr_token = qr_token
             wallet_pass.pass_file_path = str(pkpass_path)
-            wallet_pass.apple_pass_url = apple_res_url if 'apple_res_url' in locals() else pass_url
-            wallet_pass.apple_pass_type_identifier = settings.APPLE_WALLET_PASS_TYPE_IDENTIFIER
-            # db.commit() will be called by orchestrator
+            wallet_pass.pass_status = package_obj.status if package_obj and package_obj.status else "ACTIVE"
 
         download_url = f"/api/v1/wallet/apple/pass/{package_secure_token}" if package_secure_token else f"/api/v1/wallet/apple/pass/{wallet_pass.id}"
         
@@ -274,15 +351,29 @@ class WalletService:
 
     @staticmethod
     def update_pass_color(package: CustomerPackage) -> str:
-        if package.current_balance <= 0 or package.status in ['COMPLETED', 'FULLY_UTILIZED', 'EXPIRED']:
+        """
+        Dynamic Theme Resolver:
+        - WHITE: Expired, Completed, or 0 balance
+        - GREY: Started using package (current_balance < package_value)
+        - GOLD: Purchased & no services consumed yet (current_balance == package_value)
+        """
+        import datetime
+        today_str = datetime.date.today().strftime('%Y-%m-%d')
+        is_expired = False
+        if package.expiry_date:
+            exp_str = package.expiry_date.strftime('%Y-%m-%d') if hasattr(package.expiry_date, 'strftime') else str(package.expiry_date)
+            if exp_str < today_str:
+                is_expired = True
+
+        pkg_status = (package.status or '').upper()
+        if is_expired or pkg_status in ['COMPLETED', 'FULLY_UTILIZED', 'EXPIRED'] or float(package.current_balance or 0) <= 0:
             return "WHITE"
-        
-        if package.package_value and package.package_value > 0:
-            ratio = float(package.current_balance) / float(package.package_value)
-            if ratio < 0.15:
-                return "ORANGE"
-            elif ratio < 1.0:
-                return "GREY"
-                
+
+        val = float(package.package_value or 0)
+        bal = float(package.current_balance or 0)
+
+        if val > 0 and bal < val:
+            return "GREY"
+
         return "GOLD"
 

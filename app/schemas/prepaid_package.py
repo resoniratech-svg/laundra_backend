@@ -56,11 +56,37 @@ class CustomerPackageResponse(CustomerPackageBase):
     apple_wallet_url: Optional[str] = None
     google_wallet_url: Optional[str] = None
     pass_color: Optional[str] = "GOLD"
+    wash_total: Optional[int] = 0
+    wash_left: Optional[int] = 0
+    iron_total: Optional[int] = 0
+    iron_left: Optional[int] = 0
+    dry_total: Optional[int] = 0
+    dry_left: Optional[int] = 0
+    steam_total: Optional[int] = 0
+    steam_left: Optional[int] = 0
+    service_items: Optional[List[Any]] = []  # Dynamic: [{"service": "Wash & Press", "total": 10, "left": 8}, ...]
     package: Optional[PrepaidPackageResponse] = None
     wallet_generation: Optional[WalletGenerationStatus] = None
 
     class Config:
         from_attributes = True
+
+class ServiceDeduction(BaseModel):
+    service: str           # Exact service name, e.g. "Wash & Press", "Premium Services"
+    quantity: int = 0      # How many to deduct
+
+class CustomerPackageDeductRequest(BaseModel):
+    customer_id: Optional[uuid.UUID] = None
+    customer_package_id: Optional[uuid.UUID] = None
+    # Dynamic service deductions — works with ANY service name
+    deductions: Optional[List[ServiceDeduction]] = []
+    # Legacy fixed-field deductions (still supported for backward compat)
+    wash_used: Optional[int] = 0
+    iron_used: Optional[int] = 0
+    dry_used: Optional[int] = 0
+    steam_used: Optional[int] = 0
+    amount_used: Optional[float] = 0.0
+    remarks: Optional[str] = None
         
 class PackageRedeemRequest(BaseModel):
     secure_token: str

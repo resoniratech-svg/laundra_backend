@@ -1,6 +1,6 @@
 from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, Numeric
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 import uuid
 import datetime
 
@@ -31,6 +31,20 @@ class CustomerPackage(Base):
     apple_wallet_url: Mapped[str] = mapped_column(Text, nullable=True)
 
     pass_color: Mapped[str] = mapped_column(String(20), default="GOLD") # GOLD, GREY, ORANGE, WHITE
+
+    # Legacy fixed columns (kept for backward compatibility)
+    wash_total: Mapped[int] = mapped_column(Integer, default=0, nullable=True)
+    wash_left: Mapped[int] = mapped_column(Integer, default=0, nullable=True)
+    iron_total: Mapped[int] = mapped_column(Integer, default=0, nullable=True)
+    iron_left: Mapped[int] = mapped_column(Integer, default=0, nullable=True)
+    dry_total: Mapped[int] = mapped_column(Integer, default=0, nullable=True)
+    dry_left: Mapped[int] = mapped_column(Integer, default=0, nullable=True)
+    steam_total: Mapped[int] = mapped_column(Integer, default=0, nullable=True)
+    steam_left: Mapped[int] = mapped_column(Integer, default=0, nullable=True)
+
+    # Dynamic JSONB column — single source of truth for ALL service types
+    # Format: [{"service": "Wash & Press", "total": 10, "left": 10}, {"service": "Premium Services", "total": 5, "left": 5}, ...]
+    service_items = mapped_column(JSONB, nullable=True, default=list)
 
     company = relationship("Company")
     customer = relationship("User", foreign_keys=[customer_id])
