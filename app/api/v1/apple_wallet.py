@@ -67,20 +67,32 @@ def download_apple_pass(
     from app.models.customer_package import CustomerPackage
     from app.models.user import User
 
+    # Clean the secure_token parameter in case it includes prefix/suffix
+    clean_token = secure_token
+    if clean_token.startswith("package_"):
+        clean_token = clean_token[len("package_"):]
+    if clean_token.endswith(".pkpass"):
+        clean_token = clean_token[:-len(".pkpass")]
+
     # Look up by secure_token, package ID, or serial number
-    package = db.query(CustomerPackage).filter(CustomerPackage.secure_token == secure_token).first()
+    package = db.query(CustomerPackage).filter(
+        (CustomerPackage.secure_token == clean_token) |
+        (CustomerPackage.secure_token.like(f"{clean_token}%"))
+    ).first()
     if not package:
         try:
-            val_uuid = UUID(secure_token)
+            val_uuid = UUID(clean_token)
             package = db.query(CustomerPackage).filter(CustomerPackage.id == val_uuid).first()
         except Exception:
             pass
 
     if not package:
         pass_rec_search = db.query(WalletPass).filter(
-            (WalletPass.serial_number == secure_token) |
-            (WalletPass.apple_serial_number == secure_token) |
-            (WalletPass.authentication_token == secure_token)
+            (WalletPass.serial_number == clean_token) |
+            (WalletPass.apple_serial_number == clean_token) |
+            (WalletPass.authentication_token == clean_token) |
+            (WalletPass.serial_number.like(f"%{clean_token}%")) |
+            (WalletPass.apple_serial_number.like(f"%{clean_token}%"))
         ).first()
         if pass_rec_search:
             package = db.query(CustomerPackage).filter(CustomerPackage.id == pass_rec_search.customer_package_id).first()
@@ -107,7 +119,7 @@ def download_apple_pass(
     return FileResponse(
         path=file_path,
         media_type="application/vnd.apple.pkpass",
-        filename=f"package_{package.secure_token[:8]}.pkpass"
+        filename="package.pkpass"
     )
 
 @router.get("/validate")

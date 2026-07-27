@@ -281,11 +281,20 @@ def public_verify_pass(
     from pathlib import Path
     import uuid
 
+    # Clean serial_number in case prefix/suffix is included
+    clean_serial = serial_number
+    if clean_serial.startswith("package_"):
+        clean_serial = clean_serial[len("package_"):]
+    if clean_serial.endswith(".pkpass"):
+        clean_serial = clean_serial[:-len(".pkpass")]
+
     # Look up by serial number, authentication token, or ID
     pass_rec = db.query(WalletPass).filter(
-        (WalletPass.serial_number == serial_number) |
-        (WalletPass.apple_serial_number == serial_number) |
-        (WalletPass.authentication_token == token)
+        (WalletPass.serial_number == clean_serial) |
+        (WalletPass.apple_serial_number == clean_serial) |
+        (WalletPass.authentication_token == token) |
+        (WalletPass.serial_number.like(f"%{clean_serial}%")) |
+        (WalletPass.apple_serial_number.like(f"%{clean_serial}%"))
     ).first()
 
     cp = None
@@ -295,12 +304,15 @@ def public_verify_pass(
     if not cp:
         # Fallback search by secure token or package id
         try:
-            val_uuid = uuid.UUID(serial_number)
+            val_uuid = uuid.UUID(clean_serial)
             cp = db.query(CustomerPackage).filter(CustomerPackage.id == val_uuid).first()
         except Exception:
             pass
         if not cp:
-            cp = db.query(CustomerPackage).filter(CustomerPackage.secure_token == serial_number).first()
+            cp = db.query(CustomerPackage).filter(
+                (CustomerPackage.secure_token == clean_serial) |
+                (CustomerPackage.secure_token.like(f"{clean_serial}%"))
+            ).first()
 
     if not cp:
         raise HTTPException(status_code=404, detail="Pass or Customer Package not found")
@@ -322,7 +334,7 @@ def public_verify_pass(
             return FileResponse(
                 path=Path(pass_rec.pass_file_path),
                 media_type="application/vnd.apple.pkpass",
-                filename=f"package_{cp.secure_token[:8]}.pkpass"
+                filename="package.pkpass"
             )
 
     cust_name = customer.name if customer else "Member"
