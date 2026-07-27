@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
 from typing import List
+from decimal import Decimal
 import uuid
 import datetime
 
@@ -191,6 +192,7 @@ def purchase_package(
     elif pkg.expiry_date:
         expiry_date = datetime.datetime.combine(pkg.expiry_date, datetime.time.max)
         
+    discount = 0.0
     final_price = float(pkg.offer_price)
     if payload.coupon_code:
         import datetime as dt
@@ -266,41 +268,53 @@ def purchase_package(
     
     # Record Order in Order History for Package Purchase
     try:
-        from app.models.order import Order, OrderItem
-        from datetime import datetime
-        new_order_id = uuid.uuid4()
-        now_time = datetime.utcnow()
-        ord_num = f"ORD-PKG-{now_time.strftime('%Y%m%d')}-{str(new_order_id)[:4].upper()}"
+        from app.models.order import Order
+        from app.models.order_item import OrderItem
+        from app.models.customer import Customer
         
-        new_order = Order(
-            id=new_order_id,
-            tenant_id=current_user.tenant_id,
-            customer_id=payload.customer_id,
-            order_number=ord_num,
-            status="COMPLETED",
-            payment_status="PAID",
-            payment_method=payload.payment_method or "CASH",
-            subtotal=Decimal(str(final_price)),
-            discount_amount=Decimal(str(discount_amount)),
-            total_amount=Decimal(str(final_price)),
-            notes=f"Purchased Prepaid Package: {pkg.name}",
-            order_type="PACKAGE_PURCHASE",
-            created_at=now_time,
-            updated_at=now_time
-        )
-        db.add(new_order)
-        db.flush()
+        # Ensure customer exists in customers table
+        cust_rec = db.query(Customer).filter(
+            Customer.id == payload.customer_id,
+            Customer.tenant_id == current_user.tenant_id
+        ).first()
         
-        new_item = OrderItem(
-            id=uuid.uuid4(),
-            order_id=new_order_id,
-            item_name=f"Prepaid Package - {pkg.name}",
-            quantity=1,
-            unit_price=Decimal(str(final_price)),
-            total_price=Decimal(str(final_price))
-        )
-        db.add(new_item)
-        db.commit()
+        if not cust_rec:
+            user_rec = db.query(User).filter(User.id == payload.customer_id).first()
+            if user_rec:
+                cust_rec = Customer(
+                    id=user_rec.id,
+                    tenant_id=current_user.tenant_id,
+                    name=user_rec.name,
+                    phone=user_rec.phone,
+                    email=user_rec.email,
+                    wallet_balance=Decimal("0.0"),
+                    loyalty_points=0,
+                    qr_secret=uuid.uuid4().hex
+                )
+                db.add(cust_rec)
+                db.commit()
+
+        if cust_rec:
+            new_order_id = uuid.uuid4()
+            now_time = datetime.datetime.utcnow()
+            ord_num = f"ORD-PKG-{now_time.strftime('%Y%m%d')}-{str(new_order_id)[:4].upper()}"
+            
+            new_order = Order(
+                id=new_order_id,
+                tenant_id=current_user.tenant_id,
+                customer_id=cust_rec.id,
+                order_number=ord_num,
+                status="COMPLETED",
+                payment_status="PAID",
+                total_amount=Decimal(str(final_price)),
+                discount=Decimal(str(discount)),
+                paid_amount=Decimal(str(final_price)),
+                special_instructions=f"Purchased Prepaid Package: {pkg.name}",
+                created_at=now_time,
+                updated_at=now_time
+            )
+            db.add(new_order)
+            db.commit()
     except Exception as e_ord:
         import logging
         logging.getLogger(__name__).error(f"Could not record order for package purchase: {e_ord}")
@@ -536,7 +550,6 @@ def deduct_package_usage(
 
     # Record PackageUsageHistory audit tracking
     try:
-        from datetime import datetime
         deducted_summary = []
         if payload.deductions:
             for d in payload.deductions:
@@ -553,7 +566,7 @@ def deduct_package_usage(
             customer_package_id=cp.id,
             quantity_used=total_deducted,
             remarks=payload.remarks or desc_str,
-            transaction_date=datetime.utcnow()
+            transaction_date=datetime.datetime.utcnow()
         )
         db.add(audit_hist)
         db.commit()
