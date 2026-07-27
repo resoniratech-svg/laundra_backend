@@ -317,11 +317,18 @@ def public_verify_pass(
     if not cp:
         raise HTTPException(status_code=404, detail="Pass or Customer Package not found")
 
+    customer = db.query(User).filter(User.id == cp.customer_id).first()
+
     if not pass_rec:
         pass_rec = db.query(WalletPass).filter(WalletPass.customer_package_id == cp.id).first()
+    if not pass_rec:
+        try:
+            WalletService.create_and_save_wallet_pass(db, cp, customer)
+            db.commit()
+            pass_rec = db.query(WalletPass).filter(WalletPass.customer_package_id == cp.id).first()
+        except Exception:
+            pass
 
-    customer = db.query(User).filter(User.id == cp.customer_id).first()
-    
     # Auto-refresh pass file on disk
     try:
         WalletService.update_wallet_pass_on_usage(db, cp, customer)

@@ -108,6 +108,14 @@ def download_apple_pass(
         logger.warning(f"Could not auto-refresh pass before download: {e}")
 
     pass_rec = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
+    if not pass_rec:
+        try:
+            logger.info(f"WalletPass missing for package {package.id}. Generating on-the-fly.")
+            WalletService.create_and_save_wallet_pass(db, package, customer)
+            db.commit()
+            pass_rec = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
+        except Exception as ex:
+            logger.error(f"Failed to generate missing WalletPass on-the-fly: {ex}")
 
     if not pass_rec or not pass_rec.pass_file_path:
         raise HTTPException(status_code=404, detail="Apple Wallet pass file not found")
