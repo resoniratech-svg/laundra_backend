@@ -14,9 +14,7 @@ class ImageService:
     REQUIRED_ASSETS = [
         "icon.png", "icon@2x.png", "icon@3x.png",
         "logo.png", "logo@2x.png", "logo@3x.png",
-        "thumbnail.png", "thumbnail@2x.png",
-        "strip.png", "strip@2x.png",
-        "background.png"
+        "thumbnail.png", "thumbnail@2x.png"
     ]
 
     def __init__(self, assets_dir: Optional[Path] = None):
