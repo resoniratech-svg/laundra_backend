@@ -194,17 +194,20 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 14 failed: {e}")
 
-# Isolated migration 15 – customer_packages legacy columns mapping
+# Isolated migration 15 – customer_packages service_items JSONB mapping
 try:
     with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS wash_total INTEGER DEFAULT 0;"))
-        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS wash_left INTEGER DEFAULT 0;"))
-        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS iron_total INTEGER DEFAULT 0;"))
-        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS iron_left INTEGER DEFAULT 0;"))
-        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS dry_total INTEGER DEFAULT 0;"))
-        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS dry_left INTEGER DEFAULT 0;"))
-        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS steam_total INTEGER DEFAULT 0;"))
-        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS steam_left INTEGER DEFAULT 0;"))
+        # Add dynamic service_items JSONB column
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS service_items JSONB;"))
+        # Drop legacy columns to keep the table clean as requested by the user
+        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS wash_total;"))
+        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS wash_left;"))
+        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS iron_total;"))
+        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS iron_left;"))
+        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS dry_total;"))
+        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS dry_left;"))
+        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS steam_total;"))
+        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS steam_left;"))
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 15 failed: {e}")
 
