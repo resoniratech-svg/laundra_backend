@@ -272,6 +272,7 @@ class WalletService:
             expiry_date=expiry_date or "N/A",
             qr_data=qr_token,
             coupon_cost=c_cost,
+            auth_token=auth_token,
             status=package_obj.status if package_obj and package_obj.status else "ACTIVE",
             service_items=getattr(package_obj, "service_items", []) or [],
             wash_left=w_left,

@@ -67,6 +67,7 @@ class LaundryPassData(BaseModel):
     status: Optional[str] = "ACTIVE"
     member_since: Optional[str] = "2026"
     coupon_cost: Optional[str] = "QR 0.00"
+    auth_token: Optional[str] = None  # Real authentication token from WalletPass record
     # Dynamic service items — works with ANY service type
     service_items: Optional[List[dict]] = []  # [{"service": "Wash & Press", "total": 10, "left": 8}, ...]
     # Legacy fixed fields (backward compat, defaults to 0 instead of hardcoded values)
