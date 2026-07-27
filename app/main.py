@@ -193,6 +193,21 @@ try:
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_history TEXT;"))
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 14 failed: {e}")
+
+# Isolated migration 15 – customer_packages legacy columns mapping
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS wash_total INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS wash_left INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS iron_total INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS iron_left INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS dry_total INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS dry_left INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS steam_total INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS steam_left INTEGER DEFAULT 0;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 15 failed: {e}")
+
 try:
     import alembic.config
     import alembic.command
