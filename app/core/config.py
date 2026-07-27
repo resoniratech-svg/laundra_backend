@@ -15,11 +15,11 @@ class Settings(BaseSettings):
     APPLE_WALLET_WEB_SERVICE_URL: Optional[str] = "https://laundry-project-laundry-backend.cocjl5.easypanel.host/api/v1/wallet/apple"
 
     # Apple Wallet
-    APPLE_WALLET_PASS_TYPE_IDENTIFIER: str = "pass.com.laundry.wallet"
-    APPLE_WALLET_TEAM_IDENTIFIER: str = "WRP55GW29X"
+    APPLE_WALLET_PASS_TYPE_IDENTIFIER: str = "pass.com.resonira.laundry"
+    APPLE_WALLET_TEAM_IDENTIFIER: str = "SAMPLE_TEAM_ID"
     APPLE_WALLET_CERTIFICATE_PATH: str = "certificates/apple_wallet/pass.p12"
     APPLE_WALLET_WWDR_CERTIFICATE_PATH: str = "certificates/apple_wallet/AppleWWDRCA.cer"
-    APPLE_WALLET_CERTIFICATE_PASSWORD: str = "Laundry@2026"
+    APPLE_WALLET_CERTIFICATE_PASSWORD: str = ""
     APPLE_WALLET_TEMPLATE_PATH: str = "templates/apple_wallet/pass.json"
     APPLE_WALLET_ASSETS_PATH: str = "assets/apple_wallet"
     APPLE_WALLET_GENERATED_PATH: str = "generated/apple_wallet"

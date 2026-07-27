@@ -194,20 +194,17 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 14 failed: {e}")
 
-# Isolated migration 15 – customer_packages service_items JSONB mapping
+# Isolated migration 15 – customer_packages legacy columns mapping
 try:
     with engine.begin() as conn:
-        # Add dynamic service_items JSONB column
-        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS service_items JSONB;"))
-        # Drop legacy columns to keep the table clean as requested by the user
-        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS wash_total;"))
-        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS wash_left;"))
-        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS iron_total;"))
-        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS iron_left;"))
-        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS dry_total;"))
-        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS dry_left;"))
-        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS steam_total;"))
-        conn.execute(text("ALTER TABLE customer_packages DROP COLUMN IF EXISTS steam_left;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS wash_total INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS wash_left INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS iron_total INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS iron_left INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS dry_total INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS dry_left INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS steam_total INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS steam_left INTEGER DEFAULT 0;"))
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 15 failed: {e}")
 
@@ -281,20 +278,11 @@ def public_verify_pass(
     from pathlib import Path
     import uuid
 
-    # Clean serial_number in case prefix/suffix is included
-    clean_serial = serial_number
-    if clean_serial.startswith("package_"):
-        clean_serial = clean_serial[len("package_"):]
-    if clean_serial.endswith(".pkpass"):
-        clean_serial = clean_serial[:-len(".pkpass")]
-
     # Look up by serial number, authentication token, or ID
     pass_rec = db.query(WalletPass).filter(
-        (WalletPass.serial_number == clean_serial) |
-        (WalletPass.apple_serial_number == clean_serial) |
-        (WalletPass.authentication_token == token) |
-        (WalletPass.serial_number.like(f"%{clean_serial}%")) |
-        (WalletPass.apple_serial_number.like(f"%{clean_serial}%"))
+        (WalletPass.serial_number == serial_number) |
+        (WalletPass.apple_serial_number == serial_number) |
+        (WalletPass.authentication_token == token)
     ).first()
 
     cp = None
@@ -304,31 +292,21 @@ def public_verify_pass(
     if not cp:
         # Fallback search by secure token or package id
         try:
-            val_uuid = uuid.UUID(clean_serial)
+            val_uuid = uuid.UUID(serial_number)
             cp = db.query(CustomerPackage).filter(CustomerPackage.id == val_uuid).first()
         except Exception:
             pass
         if not cp:
-            cp = db.query(CustomerPackage).filter(
-                (CustomerPackage.secure_token == clean_serial) |
-                (CustomerPackage.secure_token.like(f"{clean_serial}%"))
-            ).first()
+            cp = db.query(CustomerPackage).filter(CustomerPackage.secure_token == serial_number).first()
 
     if not cp:
         raise HTTPException(status_code=404, detail="Pass or Customer Package not found")
 
-    customer = db.query(User).filter(User.id == cp.customer_id).first()
-
     if not pass_rec:
         pass_rec = db.query(WalletPass).filter(WalletPass.customer_package_id == cp.id).first()
-    if not pass_rec:
-        try:
-            WalletService.create_and_save_wallet_pass(db, cp, customer)
-            db.commit()
-            pass_rec = db.query(WalletPass).filter(WalletPass.customer_package_id == cp.id).first()
-        except Exception:
-            pass
 
+    customer = db.query(User).filter(User.id == cp.customer_id).first()
+    
     # Auto-refresh pass file on disk
     try:
         WalletService.update_wallet_pass_on_usage(db, cp, customer)
@@ -341,7 +319,7 @@ def public_verify_pass(
             return FileResponse(
                 path=Path(pass_rec.pass_file_path),
                 media_type="application/vnd.apple.pkpass",
-                filename="package.pkpass"
+                filename=f"package_{cp.secure_token[:8]}.pkpass"
             )
 
     cust_name = customer.name if customer else "Member"
