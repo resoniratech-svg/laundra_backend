@@ -150,19 +150,44 @@ class APNsService:
         Retrieves all registered iOS devices for the given pass serial number,
         dispatches APNs push notifications, and automatically cleans up expired tokens from DB.
         """
-        print("[APNS DEBUG] ENTER notify_devices_for_pass", flush=True)
-        print(f"[APNS DEBUG] serial_number={serial_number}", flush=True)
-        print("[APNS DEBUG] BEFORE querying registered devices", flush=True)
+        db_bind = getattr(db, 'bind', None)
+        db_url = db_bind.url if db_bind else None
+        db_host = getattr(db_url, 'host', 'N/A') if db_url else 'N/A'
+        db_name = getattr(db_url, 'database', 'N/A') if db_url else 'N/A'
+        session_id = hex(id(db))
 
-        registrations = db.query(AppleDeviceRegistration).filter(
+        print("[APNS ROOT CAUSE INVESTIGATION]", flush=True)
+        print(f"[APNS INVESTIGATION] DB Host: {db_host}", flush=True)
+        print(f"[APNS INVESTIGATION] DB Name: {db_name}", flush=True)
+        print(f"[APNS INVESTIGATION] Session ID: {session_id}", flush=True)
+        print(f"[APNS INVESTIGATION] Input serial_number: {repr(serial_number)}", flush=True)
+
+        try:
+            unfiltered_regs = db.query(AppleDeviceRegistration).all()
+            print(f"[APNS INVESTIGATION] Total Unfiltered Registrations in DB: {len(unfiltered_regs)}", flush=True)
+            for r in unfiltered_regs:
+                print(f"[APNS INVESTIGATION]   Row id={r.id}, serial_number={repr(r.serial_number)}, pass_type={r.pass_type_identifier}, wallet_pass_id={r.wallet_pass_id}, device={r.device_library_identifier}", flush=True)
+        except Exception as e_all:
+            print(f"[APNS INVESTIGATION] Failed to list unfiltered registrations: {e_all}", flush=True)
+
+        query = db.query(AppleDeviceRegistration).filter(
             AppleDeviceRegistration.serial_number == serial_number
-        ).all()
+        )
 
-        print(f"[APNS DEBUG] registered device count={len(registrations)}", flush=True)
+        try:
+            compiled_sql = query.statement.compile(
+                dialect=db.bind.dialect,
+                compile_kwargs={"literal_binds": True}
+            )
+            print(f"[APNS INVESTIGATION] Compiled Literal SQL:\n{compiled_sql}", flush=True)
+        except Exception as e_comp:
+            print(f"[APNS INVESTIGATION] Filtered Query SQL:\n{query}", flush=True)
+
+        registrations = query.all()
+
+        print(f"[APNS INVESTIGATION] Filtered Device Count: {len(registrations)}", flush=True)
         for r in registrations:
-            print(f"[APNS DEBUG] device={r.device_library_identifier}", flush=True)
-            print(f"[APNS DEBUG] token={r.push_token}", flush=True)
-            print(f"[APNS DEBUG] pass_type={r.pass_type_identifier}", flush=True)
+            print(f"[APNS INVESTIGATION]   Matched device={r.device_library_identifier}, token={r.push_token[:10]}..., pass_type={r.pass_type_identifier}", flush=True)
 
         if not registrations:
             print("[APNS DEBUG] NO REGISTERED DEVICES FOUND", flush=True)

@@ -215,7 +215,8 @@ class WalletService:
                 from app.services.apple_wallet.apns_service import APNsService
                 apns = APNsService()
                 print("[PRINT DEBUG] APNS SERVICE CREATED", flush=True)
-                serial_num = wallet_pass.serial_number if wallet_pass else f"PASS-{str(package.id).replace('-', '').upper()[:12]}"
+                wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
+                serial_num = (wallet_pass.serial_number if wallet_pass and wallet_pass.serial_number else (wallet_pass.apple_serial_number if wallet_pass else None)) or f"PASS-{str(package.id).replace('-', '').upper()[:12]}"
                 logger.info(f"[OTA Lifecycle] 3. Querying registered iOS devices for serial_number={serial_num}")
                 logger.warning("[DEBUG] ABOUT TO SEND APNS package_id=%s serial=%s", package.id, serial_num)
                 print("[PRINT DEBUG] BEFORE notify_devices_for_pass", flush=True)
