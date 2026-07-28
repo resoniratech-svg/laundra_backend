@@ -290,16 +290,66 @@ def check_updated_passes(
     for r in regs:
         pass_rec = db.query(WalletPass).filter(WalletPass.serial_number == r.serial_number).first()
         if pass_rec:
-            updated_dt = pass_rec.updated_at or pass_rec.created_at or datetime.datetime.utcnow()
+            raw_updated_at = getattr(pass_rec, 'updated_at', None)
+            raw_created_at = getattr(pass_rec, 'created_at', None)
+            updated_dt = raw_updated_at or raw_created_at or datetime.datetime.utcnow()
             pass_ts = int(updated_dt.timestamp())
             if pass_ts > max_updated_ts:
                 max_updated_ts = pass_ts
 
-            if pass_ts > since_ts:
+            is_greater = pass_ts > since_ts
+
+            file_path_str = getattr(pass_rec, 'pass_file_path', None)
+            file_path = Path(file_path_str) if file_path_str else None
+            file_exists = file_path.exists() if file_path else False
+            file_mtime_dt = None
+            file_mtime_ts = None
+            if file_exists:
+                mtime_sec = file_path.stat().st_mtime
+                file_mtime_ts = int(mtime_sec)
+                file_mtime_dt = datetime.datetime.utcfromtimestamp(mtime_sec).isoformat()
+
+            diag_msg = (
+                "------------------------------------\n"
+                "[CHECK_UPDATED_PASSES DIAGNOSTIC]\n"
+                f"WalletPass ID: {pass_rec.id}\n"
+                f"Serial Number: {r.serial_number}\n"
+                f"updated_at (raw datetime): {raw_updated_at}\n"
+                f"created_at (raw datetime): {raw_created_at}\n"
+                f"pass_ts: {pass_ts}\n"
+                f"passesUpdatedSince (raw query parameter): {passesUpdatedSince}\n"
+                f"since_ts: {since_ts}\n"
+                f"Comparison: pass_ts > since_ts ? -> {is_greater}\n"
+                f"Pass file path: {file_path_str}\n"
+                f"Pass file exists: {file_exists}\n"
+                f"Pass file mtime (raw datetime): {file_mtime_dt} (ts={file_mtime_ts})\n"
+                f"DB updated_at vs File mtime: DB={raw_updated_at} | File={file_mtime_dt}\n"
+                "------------------------------------"
+            )
+            logger.warning(diag_msg)
+            print(diag_msg, flush=True)
+
+            if is_greater:
                 updated_serials.append(r.serial_number)
         else:
-            # If pass record not found, include serial anyway to ensure fallback
+            logger.warning(f"[CHECK_UPDATED_PASSES DIAGNOSTIC] WalletPass not found for serial={r.serial_number}, appending fallback")
+            print(f"[CHECK_UPDATED_PASSES DIAGNOSTIC] WalletPass not found for serial={r.serial_number}, appending fallback", flush=True)
             updated_serials.append(r.serial_number)
+
+    last_updated_tag = str(max_updated_ts if max_updated_ts > 0 else int(datetime.datetime.utcnow().timestamp()))
+    will_return_status = "HTTP 204 No Content" if (passesUpdatedSince and not updated_serials) else "HTTP 200 OK"
+
+    summary_diag = (
+        "------------------------------------\n"
+        "[CHECK_UPDATED_PASSES SUMMARY]\n"
+        f"updated_serials before returning: {updated_serials}\n"
+        f"max_updated_ts: {max_updated_ts}\n"
+        f"lastUpdated value returned to Apple: {last_updated_tag}\n"
+        f"HTTP response that will be returned: {will_return_status}\n"
+        "------------------------------------"
+    )
+    logger.warning(summary_diag)
+    print(summary_diag, flush=True)
 
     if passesUpdatedSince and not updated_serials:
         duration_ms = (time.time() - start_time) * 1000
@@ -307,8 +357,6 @@ def check_updated_passes(
         logger.warning(exit_msg)
         print(exit_msg, flush=True)
         return Response(status_code=204)
-
-    last_updated_tag = str(max_updated_ts if max_updated_ts > 0 else int(datetime.datetime.utcnow().timestamp()))
 
     duration_ms = (time.time() - start_time) * 1000
     exit_msg = (

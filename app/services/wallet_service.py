@@ -183,6 +183,11 @@ class WalletService:
             if wallet_pass:
                 wallet_pass.pass_status = package.status or "ACTIVE"
 
+            raw_updated_at_before = getattr(wallet_pass, 'updated_at', None) if wallet_pass else None
+            raw_created_at_before = getattr(wallet_pass, 'created_at', None) if wallet_pass else None
+            w_id_before = getattr(wallet_pass, 'id', None) if wallet_pass else None
+            s_num_before = getattr(wallet_pass, 'serial_number', None) if wallet_pass else None
+
             logger.warning("[DEBUG] ABOUT TO REGENERATE PASS package_id=%s", package.id)
             print("[PRINT DEBUG] ABOUT TO REGENERATE PASS", flush=True)
             WalletService.generate_real_apple_wallet_pass(
@@ -205,9 +210,54 @@ class WalletService:
             print("[PRINT DEBUG] AFTER logger.warning PASS REGENERATED", flush=True)
             logger.info(f"[OTA Lifecycle] 1. Package updated: package_id={package.id}, status={package.status}")
             logger.info(f"[OTA Lifecycle] 2. Pass regenerated for package_id={package.id}")
+
+            raw_updated_at_mid = getattr(wallet_pass, 'updated_at', None) if wallet_pass else None
+            raw_created_at_mid = getattr(wallet_pass, 'created_at', None) if wallet_pass else None
+            w_id_mid = getattr(wallet_pass, 'id', None) if wallet_pass else None
+            s_num_mid = getattr(wallet_pass, 'serial_number', None) if wallet_pass else None
+            utc_now_mid = datetime.datetime.utcnow()
+
+            diag_before_commit = (
+                "------------------------------------\n"
+                "[WALLET PASS UPDATE DIAGNOSTIC - BEFORE COMMIT]\n"
+                f"WalletPass ID: {w_id_mid or w_id_before}\n"
+                f"Serial Number: {s_num_mid or s_num_before}\n"
+                f"updated_at BEFORE modification: {raw_updated_at_before}\n"
+                f"updated_at AFTER modification (before commit): {raw_updated_at_mid}\n"
+                f"created_at: {raw_created_at_mid or raw_created_at_before}\n"
+                f"Current UTC time: {utc_now_mid}\n"
+                "------------------------------------"
+            )
+            logger.warning(diag_before_commit)
+            print(diag_before_commit, flush=True)
+
             print("[PRINT DEBUG] BEFORE DB COMMIT", flush=True)
             db.commit()
             print("[PRINT DEBUG] AFTER DB COMMIT", flush=True)
+
+            if wallet_pass:
+                try:
+                    db.refresh(wallet_pass)
+                except Exception:
+                    pass
+
+            raw_updated_at_after = getattr(wallet_pass, 'updated_at', None) if wallet_pass else None
+            raw_created_at_after = getattr(wallet_pass, 'created_at', None) if wallet_pass else None
+            w_id_after = getattr(wallet_pass, 'id', None) if wallet_pass else None
+            s_num_after = getattr(wallet_pass, 'serial_number', None) if wallet_pass else None
+
+            diag_after_commit = (
+                "------------------------------------\n"
+                "[WALLET PASS UPDATE DIAGNOSTIC - AFTER COMMIT & REFRESH]\n"
+                f"WalletPass ID: {w_id_after}\n"
+                f"Serial Number: {s_num_after}\n"
+                f"updated_at AFTER commit (after db.refresh): {raw_updated_at_after}\n"
+                f"created_at: {raw_created_at_after}\n"
+                f"Current UTC time: {datetime.datetime.utcnow()}\n"
+                "------------------------------------"
+            )
+            logger.warning(diag_after_commit)
+            print(diag_after_commit, flush=True)
 
             # Trigger APNs Over-the-Air (OTA) push notification to all registered iOS devices
             try:
