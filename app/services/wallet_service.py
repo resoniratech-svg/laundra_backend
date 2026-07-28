@@ -170,6 +170,7 @@ class WalletService:
         Automatic Wallet Updates when balance/washes decrease, package is renewed, or status changes.
         Regenerates PKPass with dynamic card theme.
         """
+        logger.warning("[DEBUG] ENTERED update_wallet_pass_on_usage package_id=%s", package.id)
         try:
             cust_name = customer.name if customer else "Customer"
             wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
@@ -181,6 +182,7 @@ class WalletService:
             if wallet_pass:
                 wallet_pass.pass_status = package.status or "ACTIVE"
 
+            logger.warning("[DEBUG] ABOUT TO REGENERATE PASS package_id=%s", package.id)
             WalletService.generate_real_apple_wallet_pass(
                 db=db,
                 tenant_id=package.tenant_id,
@@ -193,6 +195,7 @@ class WalletService:
                 package_secure_token=package.secure_token,
                 package_obj=package
             )
+            logger.warning("[DEBUG] PASS REGENERATED package_id=%s", package.id)
             logger.info(f"[OTA Lifecycle] 1. Package updated: package_id={package.id}, status={package.status}")
             logger.info(f"[OTA Lifecycle] 2. Pass regenerated for package_id={package.id}")
             db.commit()
@@ -203,13 +206,15 @@ class WalletService:
                 apns = APNsService()
                 serial_num = wallet_pass.serial_number if wallet_pass else f"PASS-{str(package.id).replace('-', '').upper()[:12]}"
                 logger.info(f"[OTA Lifecycle] 3. Querying registered iOS devices for serial_number={serial_num}")
+                logger.warning("[DEBUG] ABOUT TO SEND APNS package_id=%s serial=%s", package.id, serial_num)
                 summary = apns.notify_devices_for_pass(db, serial_num)
+                logger.warning("[DEBUG] APNS CALL FINISHED package_id=%s summary=%s", package.id, summary)
                 logger.info(f"[OTA Lifecycle] 4 & 5. APNs push lifecycle completed for {serial_num}: {summary}")
             except Exception as e_apns:
-                logger.error(f"[APNs] Failed to send push notification for package {package.id}: {e_apns}")
+                logger.exception(f"[APNs] Failed to send push notification for package {package.id}: {e_apns}")
 
         except Exception as e:
-            logger.error(f"Error updating wallet pass for package {package.id}: {e}")
+            logger.exception(f"Error updating wallet pass for package {package.id}: {e}")
             db.rollback()
 
     @staticmethod

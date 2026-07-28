@@ -577,10 +577,14 @@ def deduct_package_usage(
     # Regenerate Pass & APNs push
     customer = db.query(User).filter(User.id == cp.customer_id).first()
     try:
+        import logging
+        pkg_logger = logging.getLogger(__name__)
+        pkg_logger.warning("[DEBUG] ABOUT TO CALL update_wallet_pass_on_usage package_id=%s", cp.id)
         WalletService.update_wallet_pass_on_usage(db, cp, customer)
+        pkg_logger.warning("[DEBUG] RETURNED FROM update_wallet_pass_on_usage package_id=%s", cp.id)
     except Exception as e:
         import logging
-        logging.getLogger(__name__).error(f"Error updating wallet pass on usage: {e}")
+        logging.getLogger(__name__).exception(f"Error updating wallet pass on usage: {e}")
 
     return cp
 
