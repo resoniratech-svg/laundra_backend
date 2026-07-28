@@ -408,6 +408,7 @@ class WalletService:
             db.commit()
             db.refresh(wallet_pass)
         else:
+            wallet_pass.updated_at = datetime.datetime.utcnow()
             wallet_pass.wallet_object_id = f"OBJ-{pkg_hex}"
             wallet_pass.google_object_id = f"GOBJ-{pkg_hex}"
             wallet_pass.class_id = f"CLASS-LAUNDRA-{tenant_hex}"
