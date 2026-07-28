@@ -208,10 +208,11 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 15 failed: {e}")
 
-# Isolated migration 16 – package_usage_history remarks column
+# Isolated migration 16 – package_usage_history remarks column + order_id nullable
 try:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE package_usage_history ADD COLUMN IF NOT EXISTS remarks TEXT;"))
+        conn.execute(text("ALTER TABLE package_usage_history ALTER COLUMN order_id DROP NOT NULL;"))
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 16 failed: {e}")
 
