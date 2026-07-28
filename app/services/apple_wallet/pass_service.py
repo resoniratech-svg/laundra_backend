@@ -274,8 +274,12 @@ class PassService:
             }
         ]
 
-        base_backend = getattr(settings, "BACKEND_BASE_URL", "https://laundry-project-laundry-backend.cocjl5.easypanel.host").rstrip("/")
-        web_service_url = getattr(settings, "APPLE_WALLET_WEB_SERVICE_URL", None) or f"{base_backend}/api/v1/wallet/apple"
+        base_backend = getattr(settings, "BACKEND_BASE_URL", "http://localhost:8000").rstrip("/")
+        configured_web_url = getattr(settings, "APPLE_WALLET_WEB_SERVICE_URL", None)
+        if configured_web_url and configured_web_url.strip():
+            web_service_url = configured_web_url.strip()
+        else:
+            web_service_url = f"{base_backend}/api/v1/wallet/apple"
         auth_token = getattr(data, "auth_token", None) or "AUTH-TOKEN-SECURE"
 
         template["passTypeIdentifier"] = settings.APPLE_WALLET_PASS_TYPE_IDENTIFIER

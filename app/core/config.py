@@ -10,9 +10,9 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
     
-    FRONTEND_BASE_URL: str = "https://laundry-project-laundry-frontend.cocjl5.easypanel.host"
-    BACKEND_BASE_URL: str = "https://laundry-project-laundry-backend.cocjl5.easypanel.host"
-    APPLE_WALLET_WEB_SERVICE_URL: Optional[str] = "https://laundry-project-laundry-backend.cocjl5.easypanel.host/api/v1/wallet/apple"
+    FRONTEND_BASE_URL: str = "http://localhost:5173"
+    BACKEND_BASE_URL: str = "http://localhost:8000"
+    APPLE_WALLET_WEB_SERVICE_URL: Optional[str] = None
 
     # Apple Wallet
     APPLE_WALLET_PASS_TYPE_IDENTIFIER: str = "pass.com.resonira.laundry"
