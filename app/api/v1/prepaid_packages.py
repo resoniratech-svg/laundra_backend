@@ -578,8 +578,15 @@ def deduct_package_usage(
     customer = db.query(User).filter(User.id == cp.customer_id).first()
     try:
         import logging
+        import inspect
         pkg_logger = logging.getLogger(__name__)
         pkg_logger.warning("[DEBUG] ABOUT TO CALL update_wallet_pass_on_usage package_id=%s", cp.id)
+        pkg_logger.warning("[DEBUG] WalletService module=%s", WalletService.__module__)
+        pkg_logger.warning("[DEBUG] WalletService file=%s", inspect.getfile(WalletService))
+        try:
+            pkg_logger.warning("[DEBUG] update_wallet_pass_on_usage source:\n%s", inspect.getsource(WalletService.update_wallet_pass_on_usage))
+        except Exception as e_src:
+            pkg_logger.exception("Failed to get source of update_wallet_pass_on_usage: %s", e_src)
         WalletService.update_wallet_pass_on_usage(db, cp, customer)
         pkg_logger.warning("[DEBUG] RETURNED FROM update_wallet_pass_on_usage package_id=%s", cp.id)
     except Exception as e:
