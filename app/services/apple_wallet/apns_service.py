@@ -89,6 +89,9 @@ class APNsService:
         - Header 'apns-topic': passTypeIdentifier
         - Body: {}
         """
+        print("[APNS DEBUG] ABOUT TO SEND PUSH", flush=True)
+        print(f"[APNS DEBUG] token={push_token}", flush=True)
+
         if not push_token:
             return {"success": False, "reason": "empty_token", "expired": False}
 
@@ -114,6 +117,9 @@ class APNsService:
             ) as client:
                 response = client.post(url, headers=headers, content=body)
 
+            print(f"[APNS DEBUG] APNS STATUS={response.status_code}", flush=True)
+            print(f"[APNS DEBUG] APNS RESPONSE={response.text}", flush=True)
+
             if response.status_code == 200:
                 apns_id = response.headers.get("apns-id", "N/A")
                 logger.info(f"[APNs] Push SUCCESS (200 OK) for token {push_token[:10]}... [apns-id: {apns_id}]")
@@ -135,6 +141,7 @@ class APNsService:
                 return {"success": False, "reason": f"HTTP_{response.status_code}", "expired": False}
 
         except Exception as e:
+            print(f"[APNS DEBUG] PUSH FAILED: {e}", flush=True)
             logger.error(f"[APNs] Network/HTTP2 error sending push to {push_token[:10]}...: {e}")
             return {"success": False, "reason": str(e), "expired": False}
 
@@ -143,13 +150,27 @@ class APNsService:
         Retrieves all registered iOS devices for the given pass serial number,
         dispatches APNs push notifications, and automatically cleans up expired tokens from DB.
         """
+        print("[APNS DEBUG] ENTER notify_devices_for_pass", flush=True)
+        print(f"[APNS DEBUG] serial_number={serial_number}", flush=True)
+        print("[APNS DEBUG] BEFORE querying registered devices", flush=True)
+
         registrations = db.query(AppleDeviceRegistration).filter(
             AppleDeviceRegistration.serial_number == serial_number
         ).all()
 
+        print(f"[APNS DEBUG] registered device count={len(registrations)}", flush=True)
+        for r in registrations:
+            print(f"[APNS DEBUG] device={r.device_library_identifier}", flush=True)
+            print(f"[APNS DEBUG] token={r.push_token}", flush=True)
+            print(f"[APNS DEBUG] pass_type={r.pass_type_identifier}", flush=True)
+
         if not registrations:
+            print("[APNS DEBUG] NO REGISTERED DEVICES FOUND", flush=True)
             logger.info(f"[APNs] No registered iOS devices found for serial_number: {serial_number}")
-            return {"total": 0, "sent": 0, "expired_removed": 0}
+            summary = {"total": 0, "sent": 0, "expired_removed": 0}
+            print(f"[APNS DEBUG] SUMMARY={summary}", flush=True)
+            print("[APNS DEBUG] EXIT notify_devices_for_pass", flush=True)
+            return summary
 
         logger.info(f"[APNs] Found {len(registrations)} registered device(s) for pass serial_number: {serial_number}")
         
@@ -178,4 +199,6 @@ class APNsService:
             "expired_removed": removed_count
         }
         logger.info(f"[APNs] Pass update notification summary for {serial_number}: {summary}")
+        print(f"[APNS DEBUG] SUMMARY={summary}", flush=True)
+        print("[APNS DEBUG] EXIT notify_devices_for_pass", flush=True)
         return summary
