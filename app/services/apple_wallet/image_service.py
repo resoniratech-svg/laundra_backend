@@ -13,9 +13,7 @@ class ImageService:
 
     REQUIRED_ASSETS = [
         "icon.png", "icon@2x.png", "icon@3x.png",
-        "logo.png", "logo@2x.png", "logo@3x.png",
         "thumbnail.png", "thumbnail@2x.png",
-        "strip.png", "strip@2x.png",
         "background.png"
     ]
 
@@ -29,12 +27,12 @@ class ImageService:
             dest = target_dir / filename
             if src.exists():
                 shutil.copy(src, dest)
-            elif filename in ["icon.png", "icon@2x.png", "logo.png", "logo@2x.png"]:
+            elif "icon" in filename:
                 self.create_placeholder_image(dest, filename)
 
     def create_placeholder_image(self, dest_path: Path, filename: str):
-        """Generates fallback placeholder PNG image."""
-        w, h = (58, 58) if "icon" in filename else (160, 50)
+        """Generates fallback placeholder PNG icon image."""
+        w, h = (58, 58)
         img = Image.new("RGBA", (w, h), (15, 23, 42, 255))
         draw = ImageDraw.Draw(img)
         draw.rectangle([1, 1, w - 2, h - 2], outline=(255, 255, 255, 200), width=2)
