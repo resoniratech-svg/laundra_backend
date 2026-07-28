@@ -13,7 +13,6 @@ class ImageService:
 
     REQUIRED_ASSETS = [
         "icon.png", "icon@2x.png", "icon@3x.png",
-        "thumbnail.png", "thumbnail@2x.png",
         "background.png"
     ]
 
