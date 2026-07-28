@@ -193,7 +193,21 @@ class WalletService:
                 package_secure_token=package.secure_token,
                 package_obj=package
             )
+            logger.info(f"[OTA Lifecycle] 1. Package updated: package_id={package.id}, status={package.status}")
+            logger.info(f"[OTA Lifecycle] 2. Pass regenerated for package_id={package.id}")
             db.commit()
+
+            # Trigger APNs Over-the-Air (OTA) push notification to all registered iOS devices
+            try:
+                from app.services.apple_wallet.apns_service import APNsService
+                apns = APNsService()
+                serial_num = wallet_pass.serial_number if wallet_pass else f"PASS-{str(package.id).replace('-', '').upper()[:12]}"
+                logger.info(f"[OTA Lifecycle] 3. Querying registered iOS devices for serial_number={serial_num}")
+                summary = apns.notify_devices_for_pass(db, serial_num)
+                logger.info(f"[OTA Lifecycle] 4 & 5. APNs push lifecycle completed for {serial_num}: {summary}")
+            except Exception as e_apns:
+                logger.error(f"[APNs] Failed to send push notification for package {package.id}: {e_apns}")
+
         except Exception as e:
             logger.error(f"Error updating wallet pass for package {package.id}: {e}")
             db.rollback()

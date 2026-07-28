@@ -148,10 +148,11 @@ def revoke_apple_pass(
 
 from typing import Dict, Any, Optional
 import datetime
+import json
 from fastapi import Header, Response
 from app.models.apple_device_registration import AppleDeviceRegistration
 
-@router.post("/v1/devices/{device_library_identifier}/registrations/{pass_type_identifier}/{serial_number}", status_code=status.HTTP_201_CREATED)
+@router.post("/v1/devices/{device_library_identifier}/registrations/{pass_type_identifier}/{serial_number}")
 def register_passkit_device(
     device_library_identifier: str,
     pass_type_identifier: str,
@@ -163,6 +164,7 @@ def register_passkit_device(
     """
     Endpoint 1: Register Device
     Validates ApplePass auth token and registers an iOS device for push notifications.
+    Per Apple spec: returns HTTP 201 Created for new registrations, HTTP 200 OK for existing registrations.
     """
     auth_token = (authorization or "").replace("ApplePass ", "").strip()
     pass_rec = db.query(WalletPass).filter(WalletPass.serial_number == serial_number).first()
@@ -178,6 +180,7 @@ def register_passkit_device(
         AppleDeviceRegistration.serial_number == serial_number
     ).first()
 
+    is_new = False
     if not reg:
         reg = AppleDeviceRegistration(
             device_library_identifier=device_library_identifier,
@@ -187,11 +190,20 @@ def register_passkit_device(
             wallet_pass_id=pass_rec.id
         )
         db.add(reg)
+        is_new = True
     else:
         reg.push_token = push_token
 
     db.commit()
-    return {"status": "registered"}
+
+    logger.info(f"[OTA Lifecycle] Device registered for push updates: device_id={device_library_identifier}, serial={serial_number}, is_new={is_new}")
+
+    status_code = status.HTTP_201_CREATED if is_new else status.HTTP_200_OK
+    return Response(
+        status_code=status_code,
+        content=json.dumps({"status": "registered"}),
+        media_type="application/json"
+    )
 
 @router.delete("/v1/devices/{device_library_identifier}/registrations/{pass_type_identifier}/{serial_number}")
 def unregister_passkit_device(
@@ -231,7 +243,10 @@ def check_updated_passes(
     """
     Endpoint 3: Check Updated Passes
     Apple Wallet calls this after receiving a push notification to fetch updated serial numbers.
+    Per Apple spec: filters by passesUpdatedSince tag and returns HTTP 204 if no passes were updated.
     """
+    logger.info(f"[OTA Lifecycle] 6. GET /devices callback received from device: {device_library_identifier} (passesUpdatedSince={passesUpdatedSince})")
+
     regs = db.query(AppleDeviceRegistration).filter(
         AppleDeviceRegistration.device_library_identifier == device_library_identifier,
         AppleDeviceRegistration.pass_type_identifier == pass_type_identifier
@@ -240,12 +255,38 @@ def check_updated_passes(
     if not regs:
         return Response(status_code=204)
 
-    serial_numbers = [r.serial_number for r in regs if r.serial_number]
-    last_updated_tag = str(int(datetime.datetime.utcnow().timestamp()))
+    since_ts = 0
+    if passesUpdatedSince:
+        try:
+            since_ts = int(passesUpdatedSince)
+        except Exception:
+            since_ts = 0
+
+    updated_serials = []
+    max_updated_ts = 0
+
+    for r in regs:
+        pass_rec = db.query(WalletPass).filter(WalletPass.serial_number == r.serial_number).first()
+        if pass_rec:
+            updated_dt = pass_rec.updated_at or pass_rec.created_at or datetime.datetime.utcnow()
+            pass_ts = int(updated_dt.timestamp())
+            if pass_ts > max_updated_ts:
+                max_updated_ts = pass_ts
+
+            if pass_ts > since_ts:
+                updated_serials.append(r.serial_number)
+        else:
+            # If pass record not found, include serial anyway to ensure fallback
+            updated_serials.append(r.serial_number)
+
+    if passesUpdatedSince and not updated_serials:
+        return Response(status_code=204)
+
+    last_updated_tag = str(max_updated_ts if max_updated_ts > 0 else int(datetime.datetime.utcnow().timestamp()))
 
     return {
         "lastUpdated": last_updated_tag,
-        "serialNumbers": serial_numbers
+        "serialNumbers": updated_serials
     }
 
 @router.get("/v1/passes/{pass_type_identifier}/{serial_number}")
@@ -258,14 +299,34 @@ def download_updated_passkit_pass(
     """
     Endpoint 4: Download Updated Pass
     Serves the latest signed .pkpass bundle directly to Apple Wallet over the air.
+    Optimized: Serves existing file directly without redundant regeneration unless file is missing.
     """
+    logger.info(f"[OTA Lifecycle] 7. GET /passes callback received for serial_number: {serial_number}")
+
     auth_token = (authorization or "").replace("ApplePass ", "").strip()
     pass_rec = db.query(WalletPass).filter(WalletPass.serial_number == serial_number).first()
     if not pass_rec or (pass_rec.authentication_token and pass_rec.authentication_token != auth_token):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    # Only regenerate if file is missing on server disk (prevents redundant regenerations on every GET request)
+    if not pass_rec.pass_file_path or not Path(pass_rec.pass_file_path).exists():
+        if pass_rec.customer_package_id:
+            from app.models.customer_package import CustomerPackage
+            from app.models.user import User
+            cp = db.query(CustomerPackage).filter(CustomerPackage.id == pass_rec.customer_package_id).first()
+            if cp:
+                cust = db.query(User).filter(User.id == cp.customer_id).first()
+                try:
+                    logger.info(f"[OTA Lifecycle] Pass file missing on disk, generating pass for {serial_number}")
+                    WalletService.update_wallet_pass_on_usage(db, cp, cust)
+                    db.refresh(pass_rec)
+                except Exception as e:
+                    logger.warning(f"Could not regenerate pass before PassKit download: {e}")
+
     if not pass_rec.pass_file_path or not Path(pass_rec.pass_file_path).exists():
         raise HTTPException(status_code=404, detail="Pass file missing")
+
+    logger.info(f"[OTA Lifecycle] 8. Pass served over-the-air to Apple Wallet: {pass_rec.pass_file_path}")
 
     return FileResponse(
         path=Path(pass_rec.pass_file_path),
