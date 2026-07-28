@@ -171,6 +171,7 @@ class WalletService:
         Regenerates PKPass with dynamic card theme.
         """
         logger.warning("[DEBUG] ENTERED update_wallet_pass_on_usage package_id=%s", package.id)
+        print("[PRINT DEBUG] ENTERED update_wallet_pass_on_usage", flush=True)
         try:
             cust_name = customer.name if customer else "Customer"
             wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
@@ -183,6 +184,7 @@ class WalletService:
                 wallet_pass.pass_status = package.status or "ACTIVE"
 
             logger.warning("[DEBUG] ABOUT TO REGENERATE PASS package_id=%s", package.id)
+            print("[PRINT DEBUG] ABOUT TO REGENERATE PASS", flush=True)
             WalletService.generate_real_apple_wallet_pass(
                 db=db,
                 tenant_id=package.tenant_id,
@@ -195,6 +197,7 @@ class WalletService:
                 package_secure_token=package.secure_token,
                 package_obj=package
             )
+            print("[PRINT DEBUG] PASS REGENERATED", flush=True)
             logger.warning("[DEBUG] PASS REGENERATED package_id=%s", package.id)
             logger.info(f"[OTA Lifecycle] 1. Package updated: package_id={package.id}, status={package.status}")
             logger.info(f"[OTA Lifecycle] 2. Pass regenerated for package_id={package.id}")
