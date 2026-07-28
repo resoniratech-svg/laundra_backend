@@ -203,8 +203,76 @@ class PassService:
             if steam_t > 0:
                 aux_fields.append({"key": "steam_left", "label": "STEAM PRESS", "value": f"{steam_l} / {steam_t}"})
 
-        if isinstance(template, dict) and "generic" in template and isinstance(template["generic"], dict):
-            template["generic"]["auxiliaryFields"] = aux_fields
+        # If no aux_fields were produced, add a default balance field (matches main behavior)
+        if not aux_fields:
+            aux_fields.append({
+                "key": "balance",
+                "label": "Balance",
+                "value": data.remaining_balance
+            })
+
+        # ===================================================================
+        # ALWAYS build the generic pass structure programmatically
+        # (matches main branch behavior — never rely on template having it)
+        # ===================================================================
+        template["generic"] = {
+            "headerFields": [
+                {
+                    "key": "status",
+                    "value": theme["status"],
+                    "textAlignment": "PKTextAlignmentRight"
+                }
+            ],
+            "primaryFields": [
+                {
+                    "key": "customer",
+                    "label": "CUSTOMER",
+                    "value": context["customer_name"]
+                }
+            ],
+            "secondaryFields": [
+                {
+                    "key": "package",
+                    "label": "PACKAGE",
+                    "value": context["package_name"]
+                },
+                {
+                    "key": "coupon_cost",
+                    "label": "COUPON COST",
+                    "value": context["coupon_cost"]
+                }
+            ],
+            "auxiliaryFields": aux_fields,
+            "backFields": [
+                {
+                    "key": "expiry_date",
+                    "label": "EXPIRY DATE",
+                    "value": context["expiry_date"]
+                },
+                {
+                    "key": "member_since",
+                    "label": "MEMBER SINCE",
+                    "value": context["member_since"]
+                }
+            ]
+        }
+
+        # ALWAYS build barcode programmatically (main does this, staging removed it)
+        qr_data = data.qr_data or data.package_id or "PASS-DATA"
+        template["barcode"] = {
+            "format": "PKBarcodeFormatQR",
+            "message": qr_data,
+            "messageEncoding": "iso-8859-1",
+            "altText": "Scan QR Code for verification"
+        }
+        template["barcodes"] = [
+            {
+                "format": "PKBarcodeFormatQR",
+                "message": qr_data,
+                "messageEncoding": "iso-8859-1",
+                "altText": "Scan QR Code for verification"
+            }
+        ]
 
         base_backend = getattr(settings, "BACKEND_BASE_URL", "https://laundry-project-laundry-backend.cocjl5.easypanel.host").rstrip("/")
         web_service_url = getattr(settings, "APPLE_WALLET_WEB_SERVICE_URL", None) or f"{base_backend}/api/v1/wallet/apple"
