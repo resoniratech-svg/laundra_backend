@@ -166,6 +166,8 @@ def register_passkit_device(
     Validates ApplePass auth token and registers an iOS device for push notifications.
     Per Apple spec: returns HTTP 201 Created for new registrations, HTTP 200 OK for existing registrations.
     """
+    print("ENTER register_passkit_device", flush=True)
+    logger.warning("ENTER register_passkit_device")
     auth_token = (authorization or "").replace("ApplePass ", "").strip()
     pass_rec = db.query(WalletPass).filter(WalletPass.serial_number == serial_number).first()
     if not pass_rec or (pass_rec.authentication_token and pass_rec.authentication_token != auth_token):
@@ -217,6 +219,8 @@ def unregister_passkit_device(
     Endpoint 2: Unregister Device
     Removes device registration when a pass is removed from Apple Wallet.
     """
+    print("ENTER unregister_passkit_device", flush=True)
+    logger.warning("ENTER unregister_passkit_device")
     auth_token = (authorization or "").replace("ApplePass ", "").strip()
     pass_rec = db.query(WalletPass).filter(WalletPass.serial_number == serial_number).first()
     if not pass_rec or (pass_rec.authentication_token and pass_rec.authentication_token != auth_token):
@@ -233,6 +237,8 @@ def unregister_passkit_device(
 
     return {"status": "unregistered"}
 
+import time
+
 @router.get("/v1/devices/{device_library_identifier}/registrations/{pass_type_identifier}")
 def check_updated_passes(
     device_library_identifier: str,
@@ -245,14 +251,30 @@ def check_updated_passes(
     Apple Wallet calls this after receiving a push notification to fetch updated serial numbers.
     Per Apple spec: filters by passesUpdatedSince tag and returns HTTP 204 if no passes were updated.
     """
-    logger.info(f"[OTA Lifecycle] 6. GET /devices callback received from device: {device_library_identifier} (passesUpdatedSince={passesUpdatedSince})")
+    print("ENTER check_updated_passes", flush=True)
+    logger.warning("ENTER check_updated_passes")
+    start_time = time.time()
+    entry_msg = (
+        f"[OTA LOGS] ENTRY GET /devices | device_id={device_library_identifier} | "
+        f"pass_type={pass_type_identifier} | passesUpdatedSince={passesUpdatedSince}"
+    )
+    logger.warning(entry_msg)
+    print(entry_msg, flush=True)
 
     regs = db.query(AppleDeviceRegistration).filter(
         AppleDeviceRegistration.device_library_identifier == device_library_identifier,
         AppleDeviceRegistration.pass_type_identifier == pass_type_identifier
     ).all()
 
+    reg_count = len(regs)
+    logger.warning(f"[OTA LOGS] Registrations found: count={reg_count}")
+    print(f"[OTA LOGS] Registrations found: count={reg_count}", flush=True)
+
     if not regs:
+        duration_ms = (time.time() - start_time) * 1000
+        exit_msg = f"[OTA LOGS] EXIT GET /devices | Status: 204 (No Registrations) | Duration: {duration_ms:.2f}ms"
+        logger.warning(exit_msg)
+        print(exit_msg, flush=True)
         return Response(status_code=204)
 
     since_ts = 0
@@ -280,9 +302,21 @@ def check_updated_passes(
             updated_serials.append(r.serial_number)
 
     if passesUpdatedSince and not updated_serials:
+        duration_ms = (time.time() - start_time) * 1000
+        exit_msg = f"[OTA LOGS] EXIT GET /devices | Status: 204 (No Updated Passes since {passesUpdatedSince}) | Duration: {duration_ms:.2f}ms"
+        logger.warning(exit_msg)
+        print(exit_msg, flush=True)
         return Response(status_code=204)
 
     last_updated_tag = str(max_updated_ts if max_updated_ts > 0 else int(datetime.datetime.utcnow().timestamp()))
+
+    duration_ms = (time.time() - start_time) * 1000
+    exit_msg = (
+        f"[OTA LOGS] EXIT GET /devices | Status: 200 | serialNumbers={updated_serials} | "
+        f"lastUpdated={last_updated_tag} | Duration: {duration_ms:.2f}ms"
+    )
+    logger.warning(exit_msg)
+    print(exit_msg, flush=True)
 
     return {
         "lastUpdated": last_updated_tag,
@@ -301,11 +335,30 @@ def download_updated_passkit_pass(
     Serves the latest signed .pkpass bundle directly to Apple Wallet over the air.
     Optimized: Serves existing file directly without redundant regeneration unless file is missing.
     """
-    logger.info(f"[OTA Lifecycle] 7. GET /passes callback received for serial_number: {serial_number}")
-
+    print("ENTER download_updated_passkit_pass", flush=True)
+    logger.warning("ENTER download_updated_passkit_pass")
+    start_time = time.time()
+    auth_present = bool(authorization)
     auth_token = (authorization or "").replace("ApplePass ", "").strip()
+
+    entry_msg = (
+        f"[OTA LOGS] ENTRY GET /passes | serial={serial_number} | "
+        f"pass_type={pass_type_identifier} | Auth Header Present: {auth_present}"
+    )
+    logger.warning(entry_msg)
+    print(entry_msg, flush=True)
+
     pass_rec = db.query(WalletPass).filter(WalletPass.serial_number == serial_number).first()
+    auth_matched = bool(pass_rec and (not pass_rec.authentication_token or pass_rec.authentication_token == auth_token))
+
+    logger.warning(f"[OTA LOGS] Authentication token matched: {auth_matched}")
+    print(f"[OTA LOGS] Authentication token matched: {auth_matched}", flush=True)
+
     if not pass_rec or (pass_rec.authentication_token and pass_rec.authentication_token != auth_token):
+        duration_ms = (time.time() - start_time) * 1000
+        exit_msg = f"[OTA LOGS] EXIT GET /passes | Status: 401 Unauthorized | Duration: {duration_ms:.2f}ms"
+        logger.warning(exit_msg)
+        print(exit_msg, flush=True)
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     # Only regenerate if file is missing on server disk (prevents redundant regenerations on every GET request)
@@ -317,19 +370,33 @@ def download_updated_passkit_pass(
             if cp:
                 cust = db.query(User).filter(User.id == cp.customer_id).first()
                 try:
-                    logger.info(f"[OTA Lifecycle] Pass file missing on disk, generating pass for {serial_number}")
+                    logger.warning(f"[OTA LOGS] Pass file missing on disk, generating pass for {serial_number}")
                     WalletService.update_wallet_pass_on_usage(db, cp, cust)
                     db.refresh(pass_rec)
                 except Exception as e:
-                    logger.warning(f"Could not regenerate pass before PassKit download: {e}")
+                    logger.warning(f"[OTA LOGS] Could not regenerate pass before PassKit download: {e}")
 
-    if not pass_rec.pass_file_path or not Path(pass_rec.pass_file_path).exists():
+    file_path = Path(pass_rec.pass_file_path) if pass_rec.pass_file_path else None
+    file_exists = file_path.exists() if file_path else False
+    file_size = file_path.stat().st_size if (file_exists and file_path) else 0
+
+    logger.warning(f"[OTA LOGS] File Path: {file_path} | Exists: {file_exists} | Size: {file_size} bytes")
+    print(f"[OTA LOGS] File Path: {file_path} | Exists: {file_exists} | Size: {file_size} bytes", flush=True)
+
+    if not file_exists:
+        duration_ms = (time.time() - start_time) * 1000
+        exit_msg = f"[OTA LOGS] EXIT GET /passes | Status: 404 Not Found | Duration: {duration_ms:.2f}ms"
+        logger.warning(exit_msg)
+        print(exit_msg, flush=True)
         raise HTTPException(status_code=404, detail="Pass file missing")
 
-    logger.info(f"[OTA Lifecycle] 8. Pass served over-the-air to Apple Wallet: {pass_rec.pass_file_path}")
+    duration_ms = (time.time() - start_time) * 1000
+    exit_msg = f"[OTA LOGS] EXIT GET /passes | Status: 200 OK | Duration: {duration_ms:.2f}ms"
+    logger.warning(exit_msg)
+    print(exit_msg, flush=True)
 
     return FileResponse(
-        path=Path(pass_rec.pass_file_path),
+        path=file_path,
         media_type="application/vnd.apple.pkpass",
         filename=f"pass_{serial_number}.pkpass"
     )
@@ -342,7 +409,11 @@ def log_passkit_client_messages(
     Endpoint 5: Apple Wallet Log Endpoint
     Receives sync logs/messages from iOS Apple Wallet client.
     """
+    print("ENTER log_passkit_client_messages", flush=True)
+    logger.warning("ENTER log_passkit_client_messages")
     logs = payload.get("logs", [])
     for msg in logs:
-        logger.info(f"[PassKit Client Log]: {msg}")
+        log_line = f"[PassKit Client Log]: {msg}"
+        logger.warning(log_line)
+        print(log_line, flush=True)
     return {"status": "logged"}
