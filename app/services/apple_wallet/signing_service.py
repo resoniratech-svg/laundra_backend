@@ -20,9 +20,25 @@ class SigningService:
         self.signature = pass_directory / "signature"
 
     def sign(self) -> Path:
+        p12_path = Path(settings.APPLE_WALLET_CERTIFICATE_PATH)
+        wwdr_path = Path(settings.APPLE_WALLET_WWDR_CERTIFICATE_PATH)
+        password = settings.APPLE_WALLET_CERTIFICATE_PASSWORD
+
         if not self.manifest.exists():
             raise FileNotFoundError(f"Manifest file missing for signing: {self.manifest}")
 
+        # Primary Path: OpenSSL S/MIME detached signature (-md sha1) per Apple PassKit Specification
+        if p12_path.exists() and wwdr_path.exists():
+            try:
+                sig_bytes = self._sign_with_openssl(p12_path, password, wwdr_path, self.manifest)
+                self.signature.parent.mkdir(parents=True, exist_ok=True)
+                self.signature.write_bytes(sig_bytes)
+                logger.info("Successfully signed manifest.json with OpenSSL PKCS7 S/MIME signature (-md sha1).")
+                return self.signature
+            except Exception as e:
+                logger.warning(f"OpenSSL signing failed: {e}. Attempting Python cryptography fallback.")
+
+        # Fallback Path: Python cryptography
         from app.services.apple_wallet.certificate_service import CertificateService
         cert_service = CertificateService()
         key, cert, add_certs = cert_service.get_credentials()
@@ -42,7 +58,7 @@ class SigningService:
                 sig_bytes = builder.sign(serialization.Encoding.DER, options)
                 self.signature.parent.mkdir(parents=True, exist_ok=True)
                 self.signature.write_bytes(sig_bytes)
-                logger.info("Successfully signed manifest.json using cached certificates (SHA-256).")
+                logger.info("Successfully signed manifest.json using Python cryptography fallback.")
                 return self.signature
             except Exception as e:
                 logger.error(f"Cryptography signing error: {e}")
@@ -51,12 +67,12 @@ class SigningService:
         raise RuntimeError("Certificate or private key unconfigured. Cannot sign pass.")
 
     def _sign_with_openssl(self, p12_path: Path, password: str, wwdr_path: Path, manifest_path: Path) -> bytes:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp = Path(tmpdir)
-            cert_pem = tmp / "signerCert.pem"
-            key_pem = tmp / "signerKey.pem"
-            out_sig = tmp / "signature"
+        cache_dir = p12_path.parent / ".pem_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cert_pem = cache_dir / "signerCert.pem"
+        key_pem = cache_dir / "signerKey.pem"
 
+        if not (cert_pem.exists() and key_pem.exists() and cert_pem.stat().st_size > 0 and key_pem.stat().st_size > 0):
             cmd_cert = [
                 "openssl", "pkcs12", "-in", str(p12_path), "-clcerts", "-nokeys",
                 "-out", str(cert_pem), "-passin", f"pass:{password}", "-legacy"
@@ -75,6 +91,8 @@ class SigningService:
                 cmd_key.remove("-legacy")
                 subprocess.run(cmd_key, check=True)
 
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_sig = Path(tmpdir) / "signature"
             cmd_sign = [
                 "openssl", "smime", "-binary", "-sign",
                 "-certfile", str(wwdr_path),
