@@ -138,12 +138,24 @@ class PassService:
             dry_total=getattr(data, "dry_total", 0) or 0,
         )
 
+        # Format expiry date to Apple recommended '31 Dec 2026' string (omitted if None/N/A)
+        raw_exp = data.expiry_date
+        formatted_exp = None
+        if raw_exp and str(raw_exp).upper() not in ["N/A", "NONE", "", "NULL"]:
+            try:
+                from datetime import datetime
+                exp_str_clean = str(raw_exp).split("T")[0].split()[0]
+                dt_obj = datetime.strptime(exp_str_clean, "%Y-%m-%d")
+                formatted_exp = dt_obj.strftime("%d %b %Y")
+            except Exception:
+                formatted_exp = str(raw_exp)
+
         context = {
             "company_name": getattr(data, "company_name", None) or settings.APP_NAME,
             "customer_name": data.customer_name or "Member",
             "package_name": data.package_name or "Membership Pass",
             "coupon_cost": getattr(data, "coupon_cost", None) or "QR 0.00",
-            "expiry_date": data.expiry_date or "N/A",
+            "expiry_date": formatted_exp or "",
             "member_since": getattr(data, "member_since", None) or "2026",
             "status": theme["status"],
             "background_color": theme["backgroundColor"],
@@ -211,6 +223,26 @@ class PassService:
                 "value": data.remaining_balance
             })
 
+        sec_fields = [
+            {
+                "key": "package",
+                "label": "PACKAGE",
+                "value": context["package_name"]
+            },
+            {
+                "key": "coupon_cost",
+                "label": "COUPON COST",
+                "value": context["coupon_cost"]
+            }
+        ]
+
+        if formatted_exp:
+            sec_fields.append({
+                "key": "expiry_date",
+                "label": "EXPIRY DATE",
+                "value": formatted_exp
+            })
+
         # ===================================================================
         # ALWAYS build the generic pass structure programmatically
         # (matches main branch behavior — never rely on template having it)
@@ -230,18 +262,7 @@ class PassService:
                     "value": context["customer_name"]
                 }
             ],
-            "secondaryFields": [
-                {
-                    "key": "package",
-                    "label": "PACKAGE",
-                    "value": context["package_name"]
-                },
-                {
-                    "key": "coupon_cost",
-                    "label": "COUPON COST",
-                    "value": context["coupon_cost"]
-                }
-            ],
+            "secondaryFields": sec_fields,
             "auxiliaryFields": aux_fields,
             "backFields": [
                 {
