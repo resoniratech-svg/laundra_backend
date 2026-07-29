@@ -57,7 +57,7 @@ class WalletPassModel(BaseModel):
     boardingPass: Optional[PassStructure] = None
 
 class LaundryPassData(BaseModel):
-    company_name: Optional[str] = "Dry Cleaners"
+    company_name: Optional[str] = None
     customer_name: str
     package_name: str
     package_id: str

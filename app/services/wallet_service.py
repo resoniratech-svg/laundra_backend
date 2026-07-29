@@ -348,7 +348,14 @@ class WalletService:
         elif package_obj and package_obj.package_value:
             c_cost = f"QR {float(package_obj.package_value):.2f}"
 
+        # Resolve dynamic tenant/company name
+        from app.models.company import Company
+        resolved_tenant_id = tenant_id or (package_obj.tenant_id if package_obj else None)
+        comp_obj = db.query(Company).filter(Company.id == resolved_tenant_id).first() if resolved_tenant_id else None
+        dynamic_company_name = comp_obj.name if (comp_obj and comp_obj.name) else "Laundra"
+
         pass_data = LaundryPassData(
+            company_name=dynamic_company_name,
             customer_name=customer_name,
             package_name=package_name,
             package_id=str(order_id or serial_number),
