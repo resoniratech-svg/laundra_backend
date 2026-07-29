@@ -155,12 +155,42 @@ class WalletService:
         try:
             db.commit()
             db.refresh(package)
+            # Trigger APNs OTA Push Notification via unified helper
+            WalletService._notify_wallet_update(db, wallet_pass)
         except Exception as e:
             logger.error(f"Database error persisting wallet pass metadata for package {package.id}: {e}")
             db.rollback()
             return {"google_wallet": False, "apple_wallet": False, "qr_code": False}
 
         return status
+
+    @staticmethod
+    def _notify_wallet_update(db: Session, wallet_pass: Optional[WalletPass]) -> dict:
+        """
+        Unified helper to trigger APNs Over-the-Air (OTA) push notifications
+        whenever a WalletPass is updated, renewed, or consumed.
+        """
+        if not wallet_pass:
+            logger.warning("[APNs OTA] Cannot send push notification: wallet_pass is None")
+            return {"sent": 0, "failed": 0, "status": "skipped_no_pass"}
+
+        serial_num = wallet_pass.serial_number or wallet_pass.apple_serial_number
+        if not serial_num:
+            logger.warning("[APNs OTA] Cannot send push notification: serial_number missing on wallet_pass")
+            return {"sent": 0, "failed": 0, "status": "skipped_no_serial"}
+
+        try:
+            from app.services.apple_wallet.apns_service import APNsService
+            apns = APNsService()
+            logger.info(f"[OTA Lifecycle] Querying registered iOS devices for serial_number={serial_num}")
+            logger.warning(f"[DEBUG] ABOUT TO SEND APNS serial={serial_num}")
+            summary = apns.notify_devices_for_pass(db, serial_num)
+            logger.warning(f"[DEBUG] APNS CALL FINISHED serial={serial_num} summary={summary}")
+            logger.info(f"[OTA Lifecycle] APNs push lifecycle completed for {serial_num}: {summary}")
+            return summary
+        except Exception as e_apns:
+            logger.exception(f"[APNs] Failed to send push notification for serial={serial_num}: {e_apns}")
+            return {"sent": 0, "failed": 0, "error": str(e_apns)}
 
     @staticmethod
     def update_wallet_pass_on_usage(
@@ -205,11 +235,6 @@ class WalletService:
                 package_obj=package
             )
             print("[PRINT DEBUG] PASS REGENERATED", flush=True)
-            import logging
-            logging.getLogger("app.api.v1.prepaid_packages").warning("[TEST] Reached line immediately after PASS REGENERATED print")
-            print("[PRINT DEBUG] BEFORE logger.warning PASS REGENERATED", flush=True)
-            logger.warning("[DEBUG] PASS REGENERATED package_id=%s", package.id)
-            print("[PRINT DEBUG] AFTER logger.warning PASS REGENERATED", flush=True)
             logger.info(f"[OTA Lifecycle] 1. Package updated: package_id={package.id}, status={package.status}")
             logger.info(f"[OTA Lifecycle] 2. Pass regenerated for package_id={package.id}")
 
@@ -233,9 +258,7 @@ class WalletService:
             logger.warning(diag_before_commit)
             print(diag_before_commit, flush=True)
 
-            print("[PRINT DEBUG] BEFORE DB COMMIT", flush=True)
             db.commit()
-            print("[PRINT DEBUG] AFTER DB COMMIT", flush=True)
 
             if wallet_pass:
                 try:
@@ -261,23 +284,8 @@ class WalletService:
             logger.warning(diag_after_commit)
             print(diag_after_commit, flush=True)
 
-            # Trigger APNs Over-the-Air (OTA) push notification to all registered iOS devices
-            try:
-                print("[PRINT DEBUG] BEFORE APNS IMPORT", flush=True)
-                from app.services.apple_wallet.apns_service import APNsService
-                apns = APNsService()
-                print("[PRINT DEBUG] APNS SERVICE CREATED", flush=True)
-                wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
-                serial_num = (wallet_pass.serial_number if wallet_pass and wallet_pass.serial_number else (wallet_pass.apple_serial_number if wallet_pass else None)) or f"PASS-{str(package.id).replace('-', '').upper()[:12]}"
-                logger.info(f"[OTA Lifecycle] 3. Querying registered iOS devices for serial_number={serial_num}")
-                logger.warning("[DEBUG] ABOUT TO SEND APNS package_id=%s serial=%s", package.id, serial_num)
-                print("[PRINT DEBUG] BEFORE notify_devices_for_pass", flush=True)
-                summary = apns.notify_devices_for_pass(db, serial_num)
-                print("[PRINT DEBUG] AFTER notify_devices_for_pass", flush=True)
-                logger.warning("[DEBUG] APNS CALL FINISHED package_id=%s summary=%s", package.id, summary)
-                logger.info(f"[OTA Lifecycle] 4 & 5. APNs push lifecycle completed for {serial_num}: {summary}")
-            except Exception as e_apns:
-                logger.exception(f"[APNs] Failed to send push notification for package {package.id}: {e_apns}")
+            # Trigger APNs Over-the-Air (OTA) push notification via unified helper
+            WalletService._notify_wallet_update(db, wallet_pass)
 
             print("[PRINT DEBUG] EXITING update_wallet_pass_on_usage", flush=True)
         except Exception as e:
