@@ -115,15 +115,28 @@ class APNsService:
         if not self._ensure_pem_credentials():
             return {"success": False, "reason": "credentials_failed", "expired": False}
 
+        import time
+        exp_seconds = getattr(settings, "APPLE_WALLET_APNS_EXPIRATION_SECONDS", 86400)
+        exp_timestamp = str(int(time.time()) + exp_seconds)
+        priority_val = str(getattr(settings, "APPLE_WALLET_APNS_PRIORITY", "10"))
+
         url = f"https://{self.apns_host}/3/device/{push_token}"
         headers = {
             "apns-topic": self.apns_topic,
             "apns-push-type": "background",
-            "apns-expiration": "0"
+            "apns-expiration": exp_timestamp,
+            "apns-priority": priority_val
         }
         body = "{}"
 
-        logger.info(f"[APNs] Sending HTTP/2 push to token: {push_token[:10]}... (Host: {self.apns_host})")
+        logger.info(
+            f"[APNs] Dispatching HTTP/2 push request | "
+            f"apns-topic={headers['apns-topic']} | "
+            f"apns-push-type={headers['apns-push-type']} | "
+            f"apns-priority={headers['apns-priority']} | "
+            f"apns-expiration={headers['apns-expiration']} | "
+            f"Host={self.apns_host}"
+        )
 
         try:
             client = self._get_client()

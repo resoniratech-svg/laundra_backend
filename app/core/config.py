@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     APPLE_WALLET_TEMPLATE_PATH: str = "templates/apple_wallet/pass.json"
     APPLE_WALLET_ASSETS_PATH: str = "assets/apple_wallet"
     APPLE_WALLET_GENERATED_PATH: str = "generated/apple_wallet"
+    APPLE_WALLET_APNS_EXPIRATION_SECONDS: int = 86400
+    APPLE_WALLET_APNS_PRIORITY: str = "10"
 
     model_config = SettingsConfigDict(
         env_file=".env",
