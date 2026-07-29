@@ -3,7 +3,7 @@ import uuid
 import datetime
 import logging
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, Union
 
 from app.core.config import settings
 from app.models.customer_package import CustomerPackage
@@ -22,16 +22,63 @@ class WalletService:
     def resolve_wallet_pass(
         db: Session,
         serial_number: Optional[str] = None,
-        customer_id: Optional[str] = None,
-        customer_package_id: Optional[str] = None
+        customer_id: Optional[Union[str, uuid.UUID]] = None,
+        customer_package_id: Optional[Union[str, uuid.UUID]] = None,
+        identifier: Optional[Union[str, uuid.UUID]] = None
     ) -> Optional[WalletPass]:
         """
-        Unified WalletPass resolver enforcing 'One Customer -> One Wallet Pass'.
-        Priority:
-        1. serial_number (Apple PassKit protocol / verification routes)
-        2. customer_id (Permanent Wallet identity)
-        3. customer_package_id (Fallback only)
+        Single, centralized source of truth for all WalletPass lookups.
+
+        Supported Priority:
+        1. identifier (Generic resolution for download / public endpoints):
+           a) CustomerPackage.secure_token == identifier
+           b) CustomerPackage.id == identifier
+           c) WalletPass.id == identifier (Logs legacy link usage)
+           d) WalletPass.serial_number / apple_serial_number / authentication_token == identifier
+        2. serial_number (Apple PassKit routes)
+        3. customer_id (Permanent Wallet identity)
+        4. customer_package_id (Fallback only)
         """
+        if identifier:
+            ident_str = str(identifier).strip()
+
+            # 1a. Check CustomerPackage.secure_token
+            cp = db.query(CustomerPackage).filter(CustomerPackage.secure_token == ident_str).first()
+            if not cp:
+                # 1b. Check CustomerPackage.id (UUID)
+                try:
+                    cp_uuid = uuid.UUID(ident_str) if not isinstance(identifier, uuid.UUID) else identifier
+                    cp = db.query(CustomerPackage).filter(CustomerPackage.id == cp_uuid).first()
+                except (ValueError, TypeError, AttributeError):
+                    pass
+
+            if cp:
+                wp = db.query(WalletPass).filter(WalletPass.customer_id == cp.customer_id).order_by(WalletPass.created_at.desc()).first()
+                if not wp and cp.id:
+                    wp = db.query(WalletPass).filter(WalletPass.customer_package_id == cp.id).first()
+                if wp:
+                    return wp
+
+            # 1c. Check WalletPass.id (UUID) — Legacy URL handling
+            try:
+                wp_uuid = uuid.UUID(ident_str) if not isinstance(identifier, uuid.UUID) else identifier
+                wp = db.query(WalletPass).filter(WalletPass.id == wp_uuid).first()
+                if wp:
+                    logger.info(f"[Legacy Pass URL] Resolved WalletPass via legacy WalletPass.id identifier={ident_str}")
+                    return wp
+            except (ValueError, TypeError, AttributeError):
+                pass
+
+            # 1d. Check WalletPass.serial_number / apple_serial_number / authentication_token
+            wp = db.query(WalletPass).filter(
+                (WalletPass.serial_number == ident_str) |
+                (WalletPass.apple_serial_number == ident_str) |
+                (WalletPass.authentication_token == ident_str)
+            ).first()
+            if wp:
+                logger.info(f"[Legacy Pass URL] Resolved WalletPass via serial/auth_token identifier={ident_str}")
+                return wp
+
         if serial_number:
             wallet_pass = (
                 db.query(WalletPass)
@@ -46,9 +93,10 @@ class WalletService:
                 return wallet_pass
 
         if customer_id:
+            c_uuid = uuid.UUID(str(customer_id)) if isinstance(customer_id, str) else customer_id
             wallet_pass = (
                 db.query(WalletPass)
-                .filter(WalletPass.customer_id == customer_id)
+                .filter(WalletPass.customer_id == c_uuid)
                 .order_by(WalletPass.created_at.desc())
                 .first()
             )
@@ -56,9 +104,10 @@ class WalletService:
                 return wallet_pass
 
         if customer_package_id:
+            cp_uuid = uuid.UUID(str(customer_package_id)) if isinstance(customer_package_id, str) else customer_package_id
             wallet_pass = (
                 db.query(WalletPass)
-                .filter(WalletPass.customer_package_id == customer_package_id)
+                .filter(WalletPass.customer_package_id == cp_uuid)
                 .first()
             )
             if wallet_pass:

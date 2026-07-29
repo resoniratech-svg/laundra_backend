@@ -62,45 +62,39 @@ def download_apple_pass(
 ):
     """
     Downloads the generated .pkpass file.
-    Publicly accessible via secure_token, package_id, or serial_number.
+    Publicly accessible via secure_token, package_id, wallet_pass_id, or serial_number.
+    Uses centralized WalletService.resolve_wallet_pass(db, identifier=...)
     """
     from app.models.customer_package import CustomerPackage
     from app.models.user import User
 
-    # Look up by secure_token, package ID, or serial number
-    package = db.query(CustomerPackage).filter(CustomerPackage.secure_token == secure_token).first()
-    if not package:
-        try:
-            val_uuid = UUID(secure_token)
-            package = db.query(CustomerPackage).filter(CustomerPackage.id == val_uuid).first()
-        except Exception:
-            pass
+    # Centralized resolution for any generic identifier
+    pass_rec = WalletService.resolve_wallet_pass(
+        db=db,
+        identifier=secure_token
+    )
 
-    if not package:
-        pass_rec_search = db.query(WalletPass).filter(
-            (WalletPass.serial_number == secure_token) |
-            (WalletPass.apple_serial_number == secure_token) |
-            (WalletPass.authentication_token == secure_token)
-        ).first()
-        if pass_rec_search:
-            package = db.query(CustomerPackage).filter(CustomerPackage.id == pass_rec_search.customer_package_id).first()
-
-    if not package:
+    if not pass_rec:
         raise HTTPException(status_code=404, detail="Apple Wallet pass not found")
 
     # Auto-regenerate .pkpass file before serving to guarantee it has latest balances and theme!
-    customer = db.query(User).filter(User.id == package.customer_id).first()
-    try:
-        WalletService.update_wallet_pass_on_usage(db, package, customer)
-    except Exception as e:
-        logger.warning(f"Could not auto-refresh pass before download: {e}")
+    package = None
+    if pass_rec.customer_package_id:
+        package = db.query(CustomerPackage).filter(CustomerPackage.id == pass_rec.customer_package_id).first()
+    if not package and pass_rec.customer_id:
+        package = db.query(CustomerPackage).filter(
+            CustomerPackage.customer_id == pass_rec.customer_id,
+            CustomerPackage.status.in_(["ACTIVE", "IN_USE"])
+        ).order_by(CustomerPackage.purchase_date.desc()).first()
 
-    pass_rec = WalletService.resolve_wallet_pass(
-        db=db,
-        serial_number=secure_token,
-        customer_id=package.customer_id,
-        customer_package_id=package.id
-    )
+    if package:
+        customer = db.query(User).filter(User.id == package.customer_id).first()
+        try:
+            WalletService.update_wallet_pass_on_usage(db, package, customer)
+            # Re-resolve after regeneration
+            pass_rec = WalletService.resolve_wallet_pass(db=db, identifier=secure_token) or pass_rec
+        except Exception as e:
+            logger.warning(f"Could not auto-refresh pass before download: {e}")
 
     if not pass_rec or not pass_rec.pass_file_path:
         raise HTTPException(status_code=404, detail="Apple Wallet pass file not found")
@@ -109,10 +103,12 @@ def download_apple_pass(
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Pass file missing on server disk")
 
+    download_name = f"pass_{pass_rec.serial_number or secure_token[:8]}.pkpass"
+
     return FileResponse(
         path=file_path,
         media_type="application/vnd.apple.pkpass",
-        filename=f"package_{package.secure_token[:8]}.pkpass"
+        filename=download_name
     )
 
 @router.get("/validate")
