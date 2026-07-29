@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
 from typing import List
@@ -409,6 +409,7 @@ def get_active_customer_package(
 @router.post("/deduct", response_model=CustomerPackageResponse)
 def deduct_package_usage(
     payload: CustomerPackageDeductRequest,
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -574,33 +575,10 @@ def deduct_package_usage(
         import logging
         logging.getLogger(__name__).error(f"Error logging PackageUsageHistory: {e_hist}")
 
-    # Regenerate Pass & APNs push
+    # Regenerate Pass & dispatch async APNs push
     customer = db.query(User).filter(User.id == cp.customer_id).first()
     try:
-        import logging
-        import inspect
-        import dis
-        import io
-        pkg_logger = logging.getLogger(__name__)
-        pkg_logger.warning("[DEBUG] ABOUT TO CALL update_wallet_pass_on_usage package_id=%s", cp.id)
-        pkg_logger.warning("[DEBUG] WalletService module=%s", WalletService.__module__)
-        pkg_logger.warning("[DEBUG] WalletService file=%s", inspect.getfile(WalletService))
-        try:
-            pkg_logger.warning("[DEBUG] update_wallet_pass_on_usage source:\n%s", inspect.getsource(WalletService.update_wallet_pass_on_usage))
-        except Exception as e_src:
-            pkg_logger.exception("Failed to get source of update_wallet_pass_on_usage: %s", e_src)
-        pkg_logger.warning("[DEBUG] Function id=%s", hex(id(WalletService.update_wallet_pass_on_usage)))
-        pkg_logger.warning("[DEBUG] Code object id=%s", hex(id(WalletService.update_wallet_pass_on_usage.__code__)))
-        pkg_logger.warning("[DEBUG] co_firstlineno=%s", WalletService.update_wallet_pass_on_usage.__code__.co_firstlineno)
-        pkg_logger.warning("[DEBUG] co_filename=%s", WalletService.update_wallet_pass_on_usage.__code__.co_filename)
-        pkg_logger.warning("[DEBUG] co_consts=%s", WalletService.update_wallet_pass_on_usage.__code__.co_consts)
-        buf = io.StringIO()
-        dis.dis(WalletService.update_wallet_pass_on_usage, file=buf)
-        pkg_logger.warning("[DEBUG] BYTECODE:\n%s", buf.getvalue())
-        pkg_logger.warning("[DEBUG] Qualified name=%s", WalletService.update_wallet_pass_on_usage.__qualname__)
-        pkg_logger.warning("[DEBUG] Defaults=%s", WalletService.update_wallet_pass_on_usage.__defaults__)
-        WalletService.update_wallet_pass_on_usage(db, cp, customer)
-        pkg_logger.warning("[DEBUG] RETURNED FROM update_wallet_pass_on_usage package_id=%s", cp.id)
+        WalletService.update_wallet_pass_on_usage(db, cp, customer, background_tasks=background_tasks)
     except Exception as e:
         import logging
         logging.getLogger(__name__).exception(f"Error updating wallet pass on usage: {e}")

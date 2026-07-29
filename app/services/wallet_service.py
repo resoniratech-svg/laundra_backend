@@ -238,14 +238,24 @@ class WalletService:
     def update_wallet_pass_on_usage(
         db: Session,
         package: CustomerPackage,
-        customer: Optional[User] = None
+        customer: Optional[User] = None,
+        background_tasks=None
     ):
         """
         Automatic Wallet Updates when balance/washes decrease, package is renewed, or status changes.
         Regenerates PKPass with dynamic card theme.
+
+        Critical Path (synchronous, before HTTP 200):
+          1. Resolve WalletPass
+          2. Generate .pkpass (signed, zipped)
+          3. Save pass to disk
+          4. Update WalletPass record in DB
+          5. Commit WalletPass
+
+        Background Task (async, after HTTP 200):
+          6. Send APNs push notification (with exponential backoff retry)
         """
-        logger.warning("[DEBUG] ENTERED update_wallet_pass_on_usage package_id=%s", package.id)
-        print("[PRINT DEBUG] ENTERED update_wallet_pass_on_usage", flush=True)
+        logger.info("[Wallet] ENTERED update_wallet_pass_on_usage package_id=%s", package.id)
         try:
             cust_name = customer.name if customer else "Customer"
             wallet_pass = WalletService.resolve_wallet_pass(
@@ -261,13 +271,7 @@ class WalletService:
             if wallet_pass:
                 wallet_pass.pass_status = package.status or "ACTIVE"
 
-            raw_updated_at_before = getattr(wallet_pass, 'updated_at', None) if wallet_pass else None
-            raw_created_at_before = getattr(wallet_pass, 'created_at', None) if wallet_pass else None
-            w_id_before = getattr(wallet_pass, 'id', None) if wallet_pass else None
-            s_num_before = getattr(wallet_pass, 'serial_number', None) if wallet_pass else None
-
-            logger.warning("[DEBUG] ABOUT TO REGENERATE PASS package_id=%s", package.id)
-            print("[PRINT DEBUG] ABOUT TO REGENERATE PASS", flush=True)
+            # Synchronous: Regenerate pass (generate JSON, sign, zip, save to disk)
             WalletService.generate_real_apple_wallet_pass(
                 db=db,
                 tenant_id=package.tenant_id,
@@ -280,30 +284,16 @@ class WalletService:
                 package_secure_token=package.secure_token,
                 package_obj=package
             )
-            print("[PRINT DEBUG] PASS REGENERATED", flush=True)
             logger.info(f"[OTA Lifecycle] 1. Package updated: package_id={package.id}, status={package.status}")
             logger.info(f"[OTA Lifecycle] 2. Pass regenerated for package_id={package.id}")
 
-            raw_updated_at_mid = getattr(wallet_pass, 'updated_at', None) if wallet_pass else None
-            raw_created_at_mid = getattr(wallet_pass, 'created_at', None) if wallet_pass else None
-            w_id_mid = getattr(wallet_pass, 'id', None) if wallet_pass else None
-            s_num_mid = getattr(wallet_pass, 'serial_number', None) if wallet_pass else None
-            utc_now_mid = datetime.datetime.utcnow()
+            # Mark sync status as PENDING before committing (APNs push is deferred)
+            if wallet_pass:
+                wallet_pass.wallet_sync_status = "PENDING"
+                wallet_pass.wallet_sync_attempts = 0
+                wallet_pass.wallet_sync_error = None
 
-            diag_before_commit = (
-                "------------------------------------\n"
-                "[WALLET PASS UPDATE DIAGNOSTIC - BEFORE COMMIT]\n"
-                f"WalletPass ID: {w_id_mid or w_id_before}\n"
-                f"Serial Number: {s_num_mid or s_num_before}\n"
-                f"updated_at BEFORE modification: {raw_updated_at_before}\n"
-                f"updated_at AFTER modification (before commit): {raw_updated_at_mid}\n"
-                f"created_at: {raw_created_at_mid or raw_created_at_before}\n"
-                f"Current UTC time: {utc_now_mid}\n"
-                "------------------------------------"
-            )
-            logger.warning(diag_before_commit)
-            print(diag_before_commit, flush=True)
-
+            # Synchronous: Commit WalletPass changes to DB (pass file already on disk)
             db.commit()
 
             if wallet_pass:
@@ -312,31 +302,124 @@ class WalletService:
                 except Exception:
                     pass
 
-            raw_updated_at_after = getattr(wallet_pass, 'updated_at', None) if wallet_pass else None
-            raw_created_at_after = getattr(wallet_pass, 'created_at', None) if wallet_pass else None
-            w_id_after = getattr(wallet_pass, 'id', None) if wallet_pass else None
-            s_num_after = getattr(wallet_pass, 'serial_number', None) if wallet_pass else None
+            logger.info(f"[OTA Lifecycle] 3. WalletPass committed to DB for package_id={package.id}")
 
-            diag_after_commit = (
-                "------------------------------------\n"
-                "[WALLET PASS UPDATE DIAGNOSTIC - AFTER COMMIT & REFRESH]\n"
-                f"WalletPass ID: {w_id_after}\n"
-                f"Serial Number: {s_num_after}\n"
-                f"updated_at AFTER commit (after db.refresh): {raw_updated_at_after}\n"
-                f"created_at: {raw_created_at_after}\n"
-                f"Current UTC time: {datetime.datetime.utcnow()}\n"
-                "------------------------------------"
-            )
-            logger.warning(diag_after_commit)
-            print(diag_after_commit, flush=True)
+            # Dispatch APNs push notification as background task
+            serial_num = None
+            if wallet_pass:
+                serial_num = wallet_pass.serial_number or wallet_pass.apple_serial_number
+            wallet_pass_id = str(wallet_pass.id) if wallet_pass else None
+            tenant_id = str(package.tenant_id)
 
-            # Trigger APNs Over-the-Air (OTA) push notification via unified helper
-            WalletService._notify_wallet_update(db, wallet_pass)
+            if background_tasks and serial_num:
+                background_tasks.add_task(
+                    WalletService._async_apns_with_retry,
+                    serial_number=serial_num,
+                    wallet_pass_id=wallet_pass_id,
+                    tenant_id=tenant_id
+                )
+                logger.info(f"[OTA Lifecycle] 4. APNs push dispatched to background task for serial={serial_num}")
+            elif serial_num:
+                # Fallback: send synchronously if no background_tasks available
+                WalletService._notify_wallet_update(db, wallet_pass)
+                logger.info(f"[OTA Lifecycle] 4. APNs push sent synchronously (no BackgroundTasks) for serial={serial_num}")
+            else:
+                logger.warning("[OTA Lifecycle] 4. Skipped APNs push: no serial_number on WalletPass")
 
-            print("[PRINT DEBUG] EXITING update_wallet_pass_on_usage", flush=True)
         except Exception as e:
             logger.exception(f"Error updating wallet pass for package {package.id}: {e}")
             db.rollback()
+
+    @staticmethod
+    def _async_apns_with_retry(
+        serial_number: str,
+        wallet_pass_id: str,
+        tenant_id: str,
+        max_attempts: int = 4,
+        backoff_schedule: list = None
+    ):
+        """
+        Background task: Send APNs push notification with exponential backoff retry.
+
+        Schedule:
+          Attempt 1: Immediately
+          Attempt 2: 30 seconds
+          Attempt 3: 2 minutes (120 seconds)
+          Attempt 4: 10 minutes (600 seconds)
+
+        On success: wallet_sync_status = SYNCED
+        On final failure: wallet_sync_status = FAILED, wallet_sync_error = <error details>
+        """
+        import time as _time
+        from app.core.database import SessionLocal
+
+        if backoff_schedule is None:
+            backoff_schedule = [0, 30, 120, 600]
+
+        logger.info(f"[APNs Background] Starting async APNs push for serial={serial_number}")
+
+        for attempt in range(1, max_attempts + 1):
+            wait_seconds = backoff_schedule[attempt - 1] if attempt - 1 < len(backoff_schedule) else 600
+            if wait_seconds > 0:
+                logger.info(f"[APNs Background] Attempt {attempt}/{max_attempts}: waiting {wait_seconds}s before retry for serial={serial_number}")
+                _time.sleep(wait_seconds)
+
+            bg_db = SessionLocal()
+            try:
+                from app.services.apple_wallet.apns_service import APNsService
+                apns = APNsService()
+                summary = apns.notify_devices_for_pass(bg_db, serial_number)
+
+                sent = summary.get("sent", 0)
+                total = summary.get("total", 0)
+
+                if total == 0:
+                    # No devices registered — nothing to push to. Mark as synced.
+                    logger.info(f"[APNs Background] No registered devices for serial={serial_number}. Marking SYNCED.")
+                    wp = bg_db.query(WalletPass).filter(WalletPass.id == wallet_pass_id).first()
+                    if wp:
+                        wp.wallet_sync_status = "SYNCED"
+                        wp.wallet_sync_attempts = attempt
+                        wp.wallet_sync_error = None
+                        bg_db.commit()
+                    return
+
+                if sent > 0:
+                    # At least one device successfully received the push
+                    logger.info(f"[APNs Background] SUCCESS: Attempt {attempt}/{max_attempts} sent to {sent}/{total} devices for serial={serial_number}")
+                    wp = bg_db.query(WalletPass).filter(WalletPass.id == wallet_pass_id).first()
+                    if wp:
+                        wp.wallet_sync_status = "SYNCED"
+                        wp.wallet_sync_attempts = attempt
+                        wp.wallet_sync_error = None
+                        bg_db.commit()
+                    return
+                else:
+                    error_msg = f"Attempt {attempt}: APNs returned 0 successful pushes out of {total} devices"
+                    logger.warning(f"[APNs Background] {error_msg} for serial={serial_number}")
+                    wp = bg_db.query(WalletPass).filter(WalletPass.id == wallet_pass_id).first()
+                    if wp:
+                        wp.wallet_sync_status = "PENDING" if attempt < max_attempts else "FAILED"
+                        wp.wallet_sync_attempts = attempt
+                        wp.wallet_sync_error = error_msg
+                        bg_db.commit()
+
+            except Exception as e:
+                error_msg = f"Attempt {attempt}: {type(e).__name__}: {str(e)}"
+                logger.exception(f"[APNs Background] FAILED: {error_msg} for serial={serial_number}")
+                try:
+                    wp = bg_db.query(WalletPass).filter(WalletPass.id == wallet_pass_id).first()
+                    if wp:
+                        wp.wallet_sync_status = "PENDING" if attempt < max_attempts else "FAILED"
+                        wp.wallet_sync_attempts = attempt
+                        wp.wallet_sync_error = error_msg
+                        bg_db.commit()
+                except Exception:
+                    bg_db.rollback()
+            finally:
+                bg_db.close()
+
+        logger.error(f"[APNs Background] EXHAUSTED all {max_attempts} attempts for serial={serial_number}. Status: FAILED.")
 
     @staticmethod
     def generate_apple_wallet_link(package: CustomerPackage) -> str:

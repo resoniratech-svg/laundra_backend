@@ -34,6 +34,28 @@ class APNsService:
         self.p12_password = settings.APPLE_WALLET_CERTIFICATE_PASSWORD
         self._cert_path: Optional[Path] = None
         self._key_path: Optional[Path] = None
+        self._persistent_client: Optional[httpx.Client] = None
+
+    def _get_client(self) -> httpx.Client:
+        """Returns or initializes a persistent, reusable HTTP/2 client for APNs."""
+        if self._persistent_client is None or self._persistent_client.is_closed:
+            self._ensure_pem_credentials()
+            self._persistent_client = httpx.Client(
+                http2=True,
+                cert=(str(self._cert_path), str(self._key_path)),
+                timeout=10.0
+            )
+            logger.info("[APNs] Persistent HTTP/2 session created.")
+        return self._persistent_client
+
+    def _close_client(self):
+        """Safely closes the persistent client connection if open."""
+        if self._persistent_client and not self._persistent_client.is_closed:
+            try:
+                self._persistent_client.close()
+            except Exception:
+                pass
+        self._persistent_client = None
 
     def _ensure_pem_credentials(self) -> bool:
         """Extracts and caches PEM certificate and private key from PKCS#12 bundle."""
@@ -83,14 +105,9 @@ class APNsService:
 
     def send_push_notification(self, push_token: str) -> Dict[str, Any]:
         """
-        Sends an empty APNs notification payload ({}) over HTTP/2 to a registered iOS device.
-        Per Apple PassKit specification:
-        - POST /3/device/{push_token}
-        - Header 'apns-topic': passTypeIdentifier
-        - Body: {}
+        Sends an empty APNs notification payload ({}) over HTTP/2 using persistent session.
+        Auto-reconnects if connection was closed by Apple.
         """
-        print("[APNS DEBUG] ABOUT TO SEND PUSH", flush=True)
-        print(f"[APNS DEBUG] token={push_token}", flush=True)
 
         if not push_token:
             return {"success": False, "reason": "empty_token", "expired": False}
@@ -104,21 +121,20 @@ class APNsService:
             "apns-push-type": "background",
             "apns-expiration": "0"
         }
-        # Apple PassKit spec requires empty JSON payload {}
         body = "{}"
 
-        logger.info(f"[APNs] Sending HTTP/2 push to token: {push_token[:10]}... (Host: {self.apns_host}, Topic: {self.apns_topic})")
+        logger.info(f"[APNs] Sending HTTP/2 push to token: {push_token[:10]}... (Host: {self.apns_host})")
 
         try:
-            with httpx.Client(
-                http2=True,
-                cert=(str(self._cert_path), str(self._key_path)),
-                timeout=10.0
-            ) as client:
+            client = self._get_client()
+            try:
+                response = client.post(url, headers=headers, content=body)
+            except (httpx.RemoteProtocolError, httpx.NetworkError, httpx.CloseError) as e:
+                logger.warning(f"[APNs] Persistent connection interrupted ({e}). Re-establishing HTTP/2 session...")
+                self._close_client()
+                client = self._get_client()
                 response = client.post(url, headers=headers, content=body)
 
-            print(f"[APNS DEBUG] APNS STATUS={response.status_code}", flush=True)
-            print(f"[APNS DEBUG] APNS RESPONSE={response.text}", flush=True)
 
             if response.status_code == 200:
                 apns_id = response.headers.get("apns-id", "N/A")
@@ -126,7 +142,6 @@ class APNsService:
                 return {"success": True, "reason": "ok", "expired": False, "apns_id": apns_id}
             
             elif response.status_code in [400, 410]:
-                # 410 Unregistered or 400 BadDeviceToken -> Token is no longer valid or pass removed
                 resp_json = {}
                 try:
                     resp_json = response.json()
@@ -141,7 +156,6 @@ class APNsService:
                 return {"success": False, "reason": f"HTTP_{response.status_code}", "expired": False}
 
         except Exception as e:
-            print(f"[APNS DEBUG] PUSH FAILED: {e}", flush=True)
             logger.error(f"[APNs] Network/HTTP2 error sending push to {push_token[:10]}...: {e}")
             return {"success": False, "reason": str(e), "expired": False}
 
@@ -150,52 +164,13 @@ class APNsService:
         Retrieves all registered iOS devices for the given pass serial number,
         dispatches APNs push notifications, and automatically cleans up expired tokens from DB.
         """
-        db_bind = getattr(db, 'bind', None)
-        db_url = db_bind.url if db_bind else None
-        db_host = getattr(db_url, 'host', 'N/A') if db_url else 'N/A'
-        db_name = getattr(db_url, 'database', 'N/A') if db_url else 'N/A'
-        session_id = hex(id(db))
-
-        print("[APNS ROOT CAUSE INVESTIGATION]", flush=True)
-        print(f"[APNS INVESTIGATION] DB Host: {db_host}", flush=True)
-        print(f"[APNS INVESTIGATION] DB Name: {db_name}", flush=True)
-        print(f"[APNS INVESTIGATION] Session ID: {session_id}", flush=True)
-        print(f"[APNS INVESTIGATION] Input serial_number: {repr(serial_number)}", flush=True)
-
-        try:
-            unfiltered_regs = db.query(AppleDeviceRegistration).all()
-            print(f"[APNS INVESTIGATION] Total Unfiltered Registrations in DB: {len(unfiltered_regs)}", flush=True)
-            for r in unfiltered_regs:
-                print(f"[APNS INVESTIGATION]   Row id={r.id}, serial_number={repr(r.serial_number)}, pass_type={r.pass_type_identifier}, wallet_pass_id={r.wallet_pass_id}, device={r.device_library_identifier}", flush=True)
-        except Exception as e_all:
-            print(f"[APNS INVESTIGATION] Failed to list unfiltered registrations: {e_all}", flush=True)
-
-        query = db.query(AppleDeviceRegistration).filter(
+        registrations = db.query(AppleDeviceRegistration).filter(
             AppleDeviceRegistration.serial_number == serial_number
-        )
-
-        try:
-            compiled_sql = query.statement.compile(
-                dialect=db.bind.dialect,
-                compile_kwargs={"literal_binds": True}
-            )
-            print(f"[APNS INVESTIGATION] Compiled Literal SQL:\n{compiled_sql}", flush=True)
-        except Exception as e_comp:
-            print(f"[APNS INVESTIGATION] Filtered Query SQL:\n{query}", flush=True)
-
-        registrations = query.all()
-
-        print(f"[APNS INVESTIGATION] Filtered Device Count: {len(registrations)}", flush=True)
-        for r in registrations:
-            print(f"[APNS INVESTIGATION]   Matched device={r.device_library_identifier}, token={r.push_token[:10]}..., pass_type={r.pass_type_identifier}", flush=True)
+        ).all()
 
         if not registrations:
-            print("[APNS DEBUG] NO REGISTERED DEVICES FOUND", flush=True)
             logger.info(f"[APNs] No registered iOS devices found for serial_number: {serial_number}")
-            summary = {"total": 0, "sent": 0, "expired_removed": 0}
-            print(f"[APNS DEBUG] SUMMARY={summary}", flush=True)
-            print("[APNS DEBUG] EXIT notify_devices_for_pass", flush=True)
-            return summary
+            return {"total": 0, "sent": 0, "expired_removed": 0}
 
         logger.info(f"[APNs] Found {len(registrations)} registered device(s) for pass serial_number: {serial_number}")
         
@@ -224,6 +199,5 @@ class APNsService:
             "expired_removed": removed_count
         }
         logger.info(f"[APNs] Pass update notification summary for {serial_number}: {summary}")
-        print(f"[APNS DEBUG] SUMMARY={summary}", flush=True)
-        print("[APNS DEBUG] EXIT notify_devices_for_pass", flush=True)
         return summary
+

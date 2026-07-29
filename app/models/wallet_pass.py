@@ -51,6 +51,11 @@ class WalletPass(BaseModel):
     wallet_created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=datetime.datetime.utcnow)
     wallet_updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
+    # APNs sync tracking for async background push notifications
+    wallet_sync_status: Mapped[Optional[str]] = mapped_column(String(20), default="SYNCED", nullable=True)
+    wallet_sync_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    wallet_sync_attempts: Mapped[Optional[int]] = mapped_column(default=0, nullable=True)
+
 
     # Relationships
     company: Mapped["Company"] = relationship("Company")

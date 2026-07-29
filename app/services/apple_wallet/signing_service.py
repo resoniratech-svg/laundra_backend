@@ -8,7 +8,6 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.serialization import pkcs7
 
 from app.core.config import settings
-from app.services.apple_wallet.utils import parse_pkcs12_certificate, parse_x509_certificate
 
 logger = logging.getLogger("apple_wallet.signing_service")
 
@@ -21,26 +20,13 @@ class SigningService:
         self.signature = pass_directory / "signature"
 
     def sign(self) -> Path:
-        p12_path = Path(settings.APPLE_WALLET_CERTIFICATE_PATH)
-        wwdr_path = Path(settings.APPLE_WALLET_WWDR_CERTIFICATE_PATH)
-        password = settings.APPLE_WALLET_CERTIFICATE_PASSWORD
-
         if not self.manifest.exists():
             raise FileNotFoundError(f"Manifest file missing for signing: {self.manifest}")
 
-        if p12_path.exists() and wwdr_path.exists():
-            try:
-                sig_bytes = self._sign_with_openssl(p12_path, password, wwdr_path, self.manifest)
-                self.signature.parent.mkdir(parents=True, exist_ok=True)
-                self.signature.write_bytes(sig_bytes)
-                logger.info("Successfully signed manifest.json with OpenSSL PKCS7 S/MIME signature (-md sha1).")
-                return self.signature
-            except Exception as e:
-                logger.warning(f"OpenSSL signing failed: {e}. Attempting Python cryptography SHA-1 fallback.")
-
-        # Cryptography fallback using SHA1
-        key, cert, add_certs = parse_pkcs12_certificate(p12_path, password)
-        wwdr_cert = parse_x509_certificate(wwdr_path)
+        from app.services.apple_wallet.certificate_service import CertificateService
+        cert_service = CertificateService()
+        key, cert, add_certs = cert_service.get_credentials()
+        wwdr_cert = cert_service.get_wwdr_certificate()
 
         if key and cert:
             try:
@@ -56,7 +42,7 @@ class SigningService:
                 sig_bytes = builder.sign(serialization.Encoding.DER, options)
                 self.signature.parent.mkdir(parents=True, exist_ok=True)
                 self.signature.write_bytes(sig_bytes)
-                logger.info("Successfully signed manifest.json with Python cryptography (SHA-256).")
+                logger.info("Successfully signed manifest.json using cached certificates (SHA-256).")
                 return self.signature
             except Exception as e:
                 logger.error(f"Cryptography signing error: {e}")

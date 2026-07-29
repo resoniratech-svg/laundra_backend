@@ -14,6 +14,9 @@ logger = logging.getLogger("apple_wallet.certificate_service")
 class CertificateService:
     """Service for managing Apple Developer Pass Type Certificates and WWDR CA."""
 
+    _cached_credentials: Optional[Tuple[Optional[rsa.RSAPrivateKey], Optional[x509.Certificate], list]] = None
+    _cached_wwdr: Optional[x509.Certificate] = None
+
     def __init__(
         self,
         p12_path: Optional[Path] = None,
@@ -24,13 +27,33 @@ class CertificateService:
         self.p12_password = p12_password or settings.APPLE_WALLET_CERTIFICATE_PASSWORD
         self.wwdr_path = wwdr_path or Path(settings.APPLE_WALLET_WWDR_CERTIFICATE_PATH)
 
+    @classmethod
+    def load_and_cache_certificates(cls, p12_path: Optional[Path] = None, p12_password: Optional[str] = None, wwdr_path: Optional[Path] = None):
+        p12_p = p12_path or Path(settings.APPLE_WALLET_CERTIFICATE_PATH)
+        p12_pwd = p12_password or settings.APPLE_WALLET_CERTIFICATE_PASSWORD
+        wwdr_p = wwdr_path or Path(settings.APPLE_WALLET_WWDR_CERTIFICATE_PATH)
+
+        if p12_p.exists():
+            cls._cached_credentials = parse_pkcs12_certificate(p12_p, p12_pwd)
+        if wwdr_p.exists():
+            cls._cached_wwdr = parse_x509_certificate(wwdr_p)
+        logger.info("Apple Wallet certificates loaded and cached in memory.")
+
     def get_credentials(self) -> Tuple[Optional[rsa.RSAPrivateKey], Optional[x509.Certificate], list]:
-        """Loads key and cert chain from pass.p12."""
-        return parse_pkcs12_certificate(self.p12_path, self.p12_password)
+        """Loads key and cert chain from pass.p12 with memory caching."""
+        if CertificateService._cached_credentials is not None:
+            return CertificateService._cached_credentials
+        cred = parse_pkcs12_certificate(self.p12_path, self.p12_password)
+        CertificateService._cached_credentials = cred
+        return cred
 
     def get_wwdr_certificate(self) -> Optional[x509.Certificate]:
-        """Loads Apple WWDR CA certificate from AppleWWDRCA.cer."""
-        return parse_x509_certificate(self.wwdr_path)
+        """Loads Apple WWDR CA certificate with memory caching."""
+        if CertificateService._cached_wwdr is not None:
+            return CertificateService._cached_wwdr
+        wwdr = parse_x509_certificate(self.wwdr_path)
+        CertificateService._cached_wwdr = wwdr
+        return wwdr
 
     def is_certificate_configured(self) -> bool:
         """Returns True if valid pass key & cert are loaded."""

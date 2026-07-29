@@ -145,6 +145,9 @@ try:
         conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS serial_number VARCHAR(255);"))
         conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS authentication_token VARCHAR(255);"))
         conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS qr_token VARCHAR(500);"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS wallet_sync_status VARCHAR(20) DEFAULT 'SYNCED';"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS wallet_sync_error TEXT;"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD COLUMN IF NOT EXISTS wallet_sync_attempts INTEGER DEFAULT 0;"))
         conn.execute(text("ALTER TABLE customer_packages ALTER COLUMN google_wallet_url TYPE TEXT;"))
         conn.execute(text("ALTER TABLE customer_packages ALTER COLUMN apple_wallet_url TYPE TEXT;"))
 except Exception as e:
@@ -251,6 +254,14 @@ try:
     print("[STARTUP] Superadmin seed check completed.")
 except Exception as e:
     print(f"[STARTUP WARNING] Superadmin seed failed: {e}")
+
+# Cache Apple Wallet certificates in memory at startup
+try:
+    from app.services.apple_wallet.certificate_service import CertificateService
+    CertificateService.load_and_cache_certificates()
+    print("[STARTUP] Apple Wallet certificates cached in memory.")
+except Exception as e:
+    print(f"[STARTUP WARNING] Apple Wallet certificate caching failed: {e}")
 
 # CORS configuration MUST BE LAST to wrap all other middlewares
 app.add_middleware(
