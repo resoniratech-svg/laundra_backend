@@ -293,7 +293,7 @@ def check_updated_passes(
             raw_updated_at = getattr(pass_rec, 'updated_at', None)
             raw_created_at = getattr(pass_rec, 'created_at', None)
             updated_dt = raw_updated_at or raw_created_at or datetime.datetime.utcnow()
-            pass_ts = int(updated_dt.timestamp())
+            pass_ts = int(updated_dt.timestamp() * 1_000_000)
             if pass_ts > max_updated_ts:
                 max_updated_ts = pass_ts
 
@@ -306,7 +306,7 @@ def check_updated_passes(
             file_mtime_ts = None
             if file_exists:
                 mtime_sec = file_path.stat().st_mtime
-                file_mtime_ts = int(mtime_sec)
+                file_mtime_ts = int(mtime_sec * 1_000_000)
                 file_mtime_dt = datetime.datetime.utcfromtimestamp(mtime_sec).isoformat()
 
             diag_msg = (
@@ -316,9 +316,9 @@ def check_updated_passes(
                 f"Serial Number: {r.serial_number}\n"
                 f"updated_at (raw datetime): {raw_updated_at}\n"
                 f"created_at (raw datetime): {raw_created_at}\n"
-                f"pass_ts: {pass_ts}\n"
+                f"pass_ts (microsecond): {pass_ts}\n"
                 f"passesUpdatedSince (raw query parameter): {passesUpdatedSince}\n"
-                f"since_ts: {since_ts}\n"
+                f"since_ts (microsecond): {since_ts}\n"
                 f"Comparison: pass_ts > since_ts ? -> {is_greater}\n"
                 f"Pass file path: {file_path_str}\n"
                 f"Pass file exists: {file_exists}\n"
@@ -336,7 +336,7 @@ def check_updated_passes(
             print(f"[CHECK_UPDATED_PASSES DIAGNOSTIC] WalletPass not found for serial={r.serial_number}, appending fallback", flush=True)
             updated_serials.append(r.serial_number)
 
-    last_updated_tag = str(max_updated_ts if max_updated_ts > 0 else int(datetime.datetime.utcnow().timestamp()))
+    last_updated_tag = str(max_updated_ts if max_updated_ts > 0 else int(datetime.datetime.utcnow().timestamp() * 1_000_000))
     will_return_status = "HTTP 204 No Content" if (passesUpdatedSince and not updated_serials) else "HTTP 200 OK"
 
     summary_diag = (
