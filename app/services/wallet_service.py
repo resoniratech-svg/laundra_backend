@@ -19,6 +19,54 @@ async def generic_exception_handler(request, exc):
     raise exc
 class WalletService:
     @staticmethod
+    def resolve_wallet_pass(
+        db: Session,
+        serial_number: Optional[str] = None,
+        customer_id: Optional[str] = None,
+        customer_package_id: Optional[str] = None
+    ) -> Optional[WalletPass]:
+        """
+        Unified WalletPass resolver enforcing 'One Customer -> One Wallet Pass'.
+        Priority:
+        1. serial_number (Apple PassKit protocol / verification routes)
+        2. customer_id (Permanent Wallet identity)
+        3. customer_package_id (Fallback only)
+        """
+        if serial_number:
+            wallet_pass = (
+                db.query(WalletPass)
+                .filter(
+                    (WalletPass.serial_number == serial_number) |
+                    (WalletPass.apple_serial_number == serial_number) |
+                    (WalletPass.authentication_token == serial_number)
+                )
+                .first()
+            )
+            if wallet_pass:
+                return wallet_pass
+
+        if customer_id:
+            wallet_pass = (
+                db.query(WalletPass)
+                .filter(WalletPass.customer_id == customer_id)
+                .order_by(WalletPass.created_at.desc())
+                .first()
+            )
+            if wallet_pass:
+                return wallet_pass
+
+        if customer_package_id:
+            wallet_pass = (
+                db.query(WalletPass)
+                .filter(WalletPass.customer_package_id == customer_package_id)
+                .first()
+            )
+            if wallet_pass:
+                return wallet_pass
+
+        return None
+
+    @staticmethod
     def generate_google_wallet_link(package: CustomerPackage, customer_name: str = "Customer", company_name: str = "Laundra Laundry") -> str:
         """Disabled as per user request"""
         return ""
@@ -41,17 +89,11 @@ class WalletService:
         bal_str = f"QR {float(package.current_balance or package.package_value or 0.0):.2f}"
 
         try:
-            wallet_pass = None
-            if package.customer_id:
-                wallet_pass = (
-                    db.query(WalletPass)
-                    .filter(WalletPass.customer_id == package.customer_id)
-                    .order_by(WalletPass.created_at.desc())
-                    .first()
-                )
-
-            if not wallet_pass:
-                wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
+            wallet_pass = WalletService.resolve_wallet_pass(
+                db=db,
+                customer_id=package.customer_id,
+                customer_package_id=package.id
+            )
 
             pkg_hex = str(package.id).replace('-', '')[:12].upper()
             tenant_hex = str(package.tenant_id).replace('-', '')[:8].upper()
@@ -206,7 +248,11 @@ class WalletService:
         print("[PRINT DEBUG] ENTERED update_wallet_pass_on_usage", flush=True)
         try:
             cust_name = customer.name if customer else "Customer"
-            wallet_pass = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
+            wallet_pass = WalletService.resolve_wallet_pass(
+                db=db,
+                customer_id=package.customer_id,
+                customer_package_id=package.id
+            )
             
             exp_str = package.expiry_date.strftime('%Y-%m-%d') if (package.expiry_date and hasattr(package.expiry_date, 'strftime')) else str(package.expiry_date or "N/A")
             bal_str = f"QR {float(package.current_balance or package.package_value or 0.0):.2f}"
@@ -323,12 +369,12 @@ class WalletService:
         else:
             pkg_hex = uuid.uuid4().hex[:12].upper()
 
-        if not wallet_pass and package_obj:
-            wallet_pass = db.query(WalletPass).filter(
-                (WalletPass.customer_package_id == package_obj.id) |
-                (WalletPass.wallet_object_id == f"OBJ-{pkg_hex}") |
-                (WalletPass.google_object_id == f"GOBJ-{pkg_hex}")
-            ).first()
+        if not wallet_pass:
+            wallet_pass = WalletService.resolve_wallet_pass(
+                db=db,
+                customer_id=customer_id,
+                customer_package_id=package_obj.id if package_obj else None
+            )
 
         if wallet_pass and (wallet_pass.serial_number or wallet_pass.apple_serial_number):
             serial_number = wallet_pass.serial_number or wallet_pass.apple_serial_number

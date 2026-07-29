@@ -95,7 +95,12 @@ def download_apple_pass(
     except Exception as e:
         logger.warning(f"Could not auto-refresh pass before download: {e}")
 
-    pass_rec = db.query(WalletPass).filter(WalletPass.customer_package_id == package.id).first()
+    pass_rec = WalletService.resolve_wallet_pass(
+        db=db,
+        serial_number=secure_token,
+        customer_id=package.customer_id,
+        customer_package_id=package.id
+    )
 
     if not pass_rec or not pass_rec.pass_file_path:
         raise HTTPException(status_code=404, detail="Apple Wallet pass file not found")

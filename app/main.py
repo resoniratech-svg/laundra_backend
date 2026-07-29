@@ -311,7 +311,12 @@ def public_verify_pass(
         raise HTTPException(status_code=404, detail="Pass or Customer Package not found")
 
     if not pass_rec:
-        pass_rec = db.query(WalletPass).filter(WalletPass.customer_package_id == cp.id).first()
+        pass_rec = WalletService.resolve_wallet_pass(
+            db=db,
+            serial_number=serial_number,
+            customer_id=cp.customer_id,
+            customer_package_id=cp.id
+        )
 
     customer = db.query(User).filter(User.id == cp.customer_id).first()
     
