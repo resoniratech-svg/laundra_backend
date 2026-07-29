@@ -82,9 +82,11 @@ class WalletService:
                 db.flush()
             else:
                 wallet_pass.customer_package_id = package.id
+                wallet_pass.original_amount = float(package.package_value or 0.0)
                 wallet_pass.remaining_balance = float(package.current_balance or package.package_value or 0.0)
                 wallet_pass.expiry_date = package.expiry_date
                 wallet_pass.status = package.status or "ACTIVE"
+                wallet_pass.pass_status = package.status or "ACTIVE"
                 if not wallet_pass.wallet_object_id:
                     wallet_pass.wallet_object_id = f"OBJ-{pkg_hex}"
                 if not wallet_pass.class_id:
@@ -320,11 +322,11 @@ class WalletService:
                 (WalletPass.google_object_id == f"GOBJ-{pkg_hex}")
             ).first()
 
-        if package_obj:
+        if wallet_pass and (wallet_pass.serial_number or wallet_pass.apple_serial_number):
+            serial_number = wallet_pass.serial_number or wallet_pass.apple_serial_number
+        elif package_obj:
             pkg_hex = str(package_obj.id).replace('-', '').upper()[:12]
             serial_number = f"PASS-{pkg_hex}"
-        elif wallet_pass and wallet_pass.apple_serial_number:
-            serial_number = wallet_pass.apple_serial_number
         else:
             serial_number = f"PASS-{uuid.uuid4().hex[:8].upper()}"
 
