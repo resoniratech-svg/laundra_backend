@@ -219,6 +219,13 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 16 failed: {e}")
 
+# Isolated migration 17 – customer_packages service_items JSONB column
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE customer_packages ADD COLUMN IF NOT EXISTS service_items JSONB;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 17 failed: {e}")
+
 try:
     import alembic.config
     import alembic.command
