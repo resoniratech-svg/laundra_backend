@@ -425,44 +425,62 @@ class WalletService:
                 if total == 0:
                     # No devices registered — nothing to push to. Mark as synced.
                     logger.info(f"[APNs Background] No registered devices for serial={serial_number}. Marking SYNCED.")
-                    wp = bg_db.query(WalletPass).filter(WalletPass.id == wallet_pass_id).first()
-                    if wp:
-                        wp.wallet_sync_status = "SYNCED"
-                        wp.wallet_sync_attempts = attempt
-                        wp.wallet_sync_error = None
-                        bg_db.commit()
+                    bg_db.query(WalletPass).filter(WalletPass.id == wallet_pass_id).update(
+                        {
+                            WalletPass.wallet_sync_status: "SYNCED",
+                            WalletPass.wallet_sync_attempts: attempt,
+                            WalletPass.wallet_sync_error: None,
+                            WalletPass.updated_at: WalletPass.updated_at
+                        },
+                        synchronize_session=False
+                    )
+                    bg_db.commit()
                     return
 
                 if sent > 0:
                     # At least one device successfully received the push
                     logger.info(f"[APNs Background] SUCCESS: Attempt {attempt}/{max_attempts} sent to {sent}/{total} devices for serial={serial_number}")
-                    wp = bg_db.query(WalletPass).filter(WalletPass.id == wallet_pass_id).first()
-                    if wp:
-                        wp.wallet_sync_status = "SYNCED"
-                        wp.wallet_sync_attempts = attempt
-                        wp.wallet_sync_error = None
-                        bg_db.commit()
+                    bg_db.query(WalletPass).filter(WalletPass.id == wallet_pass_id).update(
+                        {
+                            WalletPass.wallet_sync_status: "SYNCED",
+                            WalletPass.wallet_sync_attempts: attempt,
+                            WalletPass.wallet_sync_error: None,
+                            WalletPass.updated_at: WalletPass.updated_at
+                        },
+                        synchronize_session=False
+                    )
+                    bg_db.commit()
                     return
                 else:
                     error_msg = f"Attempt {attempt}: APNs returned 0 successful pushes out of {total} devices"
                     logger.warning(f"[APNs Background] {error_msg} for serial={serial_number}")
-                    wp = bg_db.query(WalletPass).filter(WalletPass.id == wallet_pass_id).first()
-                    if wp:
-                        wp.wallet_sync_status = "PENDING" if attempt < max_attempts else "FAILED"
-                        wp.wallet_sync_attempts = attempt
-                        wp.wallet_sync_error = error_msg
-                        bg_db.commit()
+                    new_status = "PENDING" if attempt < max_attempts else "FAILED"
+                    bg_db.query(WalletPass).filter(WalletPass.id == wallet_pass_id).update(
+                        {
+                            WalletPass.wallet_sync_status: new_status,
+                            WalletPass.wallet_sync_attempts: attempt,
+                            WalletPass.wallet_sync_error: error_msg,
+                            WalletPass.updated_at: WalletPass.updated_at
+                        },
+                        synchronize_session=False
+                    )
+                    bg_db.commit()
 
             except Exception as e:
                 error_msg = f"Attempt {attempt}: {type(e).__name__}: {str(e)}"
                 logger.exception(f"[APNs Background] FAILED: {error_msg} for serial={serial_number}")
                 try:
-                    wp = bg_db.query(WalletPass).filter(WalletPass.id == wallet_pass_id).first()
-                    if wp:
-                        wp.wallet_sync_status = "PENDING" if attempt < max_attempts else "FAILED"
-                        wp.wallet_sync_attempts = attempt
-                        wp.wallet_sync_error = error_msg
-                        bg_db.commit()
+                    new_status = "PENDING" if attempt < max_attempts else "FAILED"
+                    bg_db.query(WalletPass).filter(WalletPass.id == wallet_pass_id).update(
+                        {
+                            WalletPass.wallet_sync_status: new_status,
+                            WalletPass.wallet_sync_attempts: attempt,
+                            WalletPass.wallet_sync_error: error_msg,
+                            WalletPass.updated_at: WalletPass.updated_at
+                        },
+                        synchronize_session=False
+                    )
+                    bg_db.commit()
                 except Exception:
                     bg_db.rollback()
             finally:
