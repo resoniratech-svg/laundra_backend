@@ -67,6 +67,10 @@ def download_apple_pass(
     """
     from app.models.customer_package import CustomerPackage
     from app.models.user import User
+    from app.services.apple_wallet.telemetry import TraceContext, WalletLogger
+
+    ctx = TraceContext()
+    WalletLogger.log("info", "Apple Download", "START Web Download", ctx, identifier=secure_token)
 
     # Centralized resolution for any generic identifier
     pass_rec = WalletService.resolve_wallet_pass(
@@ -75,6 +79,7 @@ def download_apple_pass(
     )
 
     if not pass_rec:
+        WalletLogger.log("error", "Apple Download", "FAILURE Web Download", ctx, identifier=secure_token, error="Pass not found")
         raise HTTPException(status_code=404, detail="Apple Wallet pass not found")
 
     # Auto-regenerate .pkpass file before serving to guarantee it has latest balances and theme!
@@ -90,20 +95,30 @@ def download_apple_pass(
     if package:
         customer = db.query(User).filter(User.id == package.customer_id).first()
         try:
-            WalletService.update_wallet_pass_on_usage(db, package, customer)
+            WalletService.update_wallet_pass_on_usage(db, package, customer, ctx=ctx)
             # Re-resolve after regeneration
             pass_rec = WalletService.resolve_wallet_pass(db=db, identifier=secure_token) or pass_rec
         except Exception as e:
             logger.warning(f"Could not auto-refresh pass before download: {e}")
 
     if not pass_rec or not pass_rec.pass_file_path:
+        WalletLogger.log("error", "Apple Download", "FAILURE Web Download", ctx, identifier=secure_token, error="Pass file path missing")
         raise HTTPException(status_code=404, detail="Apple Wallet pass file not found")
 
     file_path = Path(pass_rec.pass_file_path)
     if not file_path.exists():
+        WalletLogger.log("error", "Apple Download", "FAILURE Web Download", ctx, identifier=secure_token, error="Pass file missing on disk")
         raise HTTPException(status_code=404, detail="Pass file missing on server disk")
 
     download_name = f"pass_{pass_rec.serial_number or secure_token[:8]}.pkpass"
+    f_size = file_path.stat().st_size if file_path.exists() else 0
+
+    WalletLogger.log(
+        "info", "Apple Download", "SUCCESS Web Download", ctx,
+        serial_number=pass_rec.serial_number,
+        file_path=str(file_path),
+        size=f"{f_size} bytes"
+    )
 
     return FileResponse(
         path=file_path,
@@ -167,15 +182,20 @@ def register_passkit_device(
     Validates ApplePass auth token and registers an iOS device for push notifications.
     Per Apple spec: returns HTTP 201 Created for new registrations, HTTP 200 OK for existing registrations.
     """
-    print("ENTER register_passkit_device", flush=True)
-    logger.warning("ENTER register_passkit_device")
+    from app.services.apple_wallet.telemetry import TraceContext, WalletLogger
+    ctx = TraceContext()
+
+    WalletLogger.log("info", "Device Reg", "START Register", ctx, device_id=device_library_identifier, serial_number=serial_number)
+
     auth_token = (authorization or "").replace("ApplePass ", "").strip()
     pass_rec = db.query(WalletPass).filter(WalletPass.serial_number == serial_number).first()
     if not pass_rec or (pass_rec.authentication_token and pass_rec.authentication_token != auth_token):
+        WalletLogger.log("error", "Device Reg", "FAILURE Register Auth Failed", ctx, device_id=device_library_identifier, serial_number=serial_number)
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     push_token = payload.get("pushToken")
     if not push_token:
+        WalletLogger.log("error", "Device Reg", "FAILURE Missing pushToken", ctx, device_id=device_library_identifier, serial_number=serial_number)
         raise HTTPException(status_code=400, detail="Missing pushToken")
 
     reg = db.query(AppleDeviceRegistration).filter(
@@ -199,7 +219,13 @@ def register_passkit_device(
 
     db.commit()
 
-    logger.info(f"[OTA Lifecycle] Device registered for push updates: device_id={device_library_identifier}, serial={serial_number}, is_new={is_new}")
+    WalletLogger.log(
+        "info", "Device Reg", "SUCCESS Registered", ctx,
+        device_id=device_library_identifier,
+        serial_number=serial_number,
+        push_token=WalletLogger.mask(push_token),
+        is_new=is_new
+    )
 
     status_code = status.HTTP_201_CREATED if is_new else status.HTTP_200_OK
     return Response(
@@ -220,11 +246,14 @@ def unregister_passkit_device(
     Endpoint 2: Unregister Device
     Removes device registration when a pass is removed from Apple Wallet.
     """
-    print("ENTER unregister_passkit_device", flush=True)
-    logger.warning("ENTER unregister_passkit_device")
+    from app.services.apple_wallet.telemetry import TraceContext, WalletLogger
+    ctx = TraceContext()
+    WalletLogger.log("info", "Device Reg", "START Unregister", ctx, device_id=device_library_identifier, serial_number=serial_number)
+
     auth_token = (authorization or "").replace("ApplePass ", "").strip()
     pass_rec = db.query(WalletPass).filter(WalletPass.serial_number == serial_number).first()
     if not pass_rec or (pass_rec.authentication_token and pass_rec.authentication_token != auth_token):
+        WalletLogger.log("error", "Device Reg", "FAILURE Unregister Auth Failed", ctx, device_id=device_library_identifier, serial_number=serial_number)
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     reg = db.query(AppleDeviceRegistration).filter(
@@ -236,6 +265,7 @@ def unregister_passkit_device(
         db.delete(reg)
         db.commit()
 
+    WalletLogger.log("info", "Device Reg", "SUCCESS Unregistered", ctx, device_id=device_library_identifier, serial_number=serial_number)
     return {"status": "unregistered"}
 
 import time
@@ -252,30 +282,23 @@ def check_updated_passes(
     Apple Wallet calls this after receiving a push notification to fetch updated serial numbers.
     Per Apple spec: filters by passesUpdatedSince tag and returns HTTP 204 if no passes were updated.
     """
-    print("ENTER check_updated_passes", flush=True)
-    logger.warning("ENTER check_updated_passes")
-    start_time = time.time()
-    entry_msg = (
-        f"[OTA LOGS] ENTRY GET /devices | device_id={device_library_identifier} | "
-        f"pass_type={pass_type_identifier} | passesUpdatedSince={passesUpdatedSince}"
+    from app.services.apple_wallet.telemetry import TraceContext, WalletLogger
+    ctx = TraceContext()
+
+    WalletLogger.log(
+        "info", "Apple Polling", "START GET /devices", ctx,
+        device_id=device_library_identifier,
+        pass_type=pass_type_identifier,
+        passesUpdatedSince=passesUpdatedSince
     )
-    logger.warning(entry_msg)
-    print(entry_msg, flush=True)
 
     regs = db.query(AppleDeviceRegistration).filter(
         AppleDeviceRegistration.device_library_identifier == device_library_identifier,
         AppleDeviceRegistration.pass_type_identifier == pass_type_identifier
     ).all()
 
-    reg_count = len(regs)
-    logger.warning(f"[OTA LOGS] Registrations found: count={reg_count}")
-    print(f"[OTA LOGS] Registrations found: count={reg_count}", flush=True)
-
     if not regs:
-        duration_ms = (time.time() - start_time) * 1000
-        exit_msg = f"[OTA LOGS] EXIT GET /devices | Status: 204 (No Registrations) | Duration: {duration_ms:.2f}ms"
-        logger.warning(exit_msg)
-        print(exit_msg, flush=True)
+        WalletLogger.log("info", "Apple Polling", "SUCCESS GET /devices", ctx, status="204 No Registrations")
         return Response(status_code=204)
 
     since_ts = 0
@@ -299,73 +322,36 @@ def check_updated_passes(
                 max_updated_ts = pass_ts
 
             is_greater = pass_ts > since_ts
-
-            file_path_str = getattr(pass_rec, 'pass_file_path', None)
-            file_path = Path(file_path_str) if file_path_str else None
-            file_exists = file_path.exists() if file_path else False
-            file_mtime_dt = None
-            file_mtime_ts = None
-            if file_exists:
-                mtime_sec = file_path.stat().st_mtime
-                file_mtime_ts = int(mtime_sec * 1_000_000)
-                file_mtime_dt = datetime.datetime.utcfromtimestamp(mtime_sec).isoformat()
-
-            diag_msg = (
-                "------------------------------------\n"
-                "[CHECK_UPDATED_PASSES DIAGNOSTIC]\n"
-                f"WalletPass ID: {pass_rec.id}\n"
-                f"Serial Number: {r.serial_number}\n"
-                f"updated_at (raw datetime): {raw_updated_at}\n"
-                f"created_at (raw datetime): {raw_created_at}\n"
-                f"pass_ts (microsecond): {pass_ts}\n"
-                f"passesUpdatedSince (raw query parameter): {passesUpdatedSince}\n"
-                f"since_ts (microsecond): {since_ts}\n"
-                f"Comparison: pass_ts > since_ts ? -> {is_greater}\n"
-                f"Pass file path: {file_path_str}\n"
-                f"Pass file exists: {file_exists}\n"
-                f"Pass file mtime (raw datetime): {file_mtime_dt} (ts={file_mtime_ts})\n"
-                f"DB updated_at vs File mtime: DB={raw_updated_at} | File={file_mtime_dt}\n"
-                "------------------------------------"
+            WalletLogger.log(
+                "info", "Apple Polling", "Comparison", ctx,
+                serial_number=r.serial_number,
+                server_updated_at=raw_updated_at,
+                pass_ts=pass_ts,
+                since_ts=since_ts,
+                is_greater=is_greater
             )
-            logger.warning(diag_msg)
-            print(diag_msg, flush=True)
 
             if is_greater:
                 updated_serials.append(r.serial_number)
         else:
-            logger.warning(f"[CHECK_UPDATED_PASSES DIAGNOSTIC] WalletPass not found for serial={r.serial_number}, appending fallback")
-            print(f"[CHECK_UPDATED_PASSES DIAGNOSTIC] WalletPass not found for serial={r.serial_number}, appending fallback", flush=True)
             updated_serials.append(r.serial_number)
 
     last_updated_tag = str(max_updated_ts if max_updated_ts > 0 else int(datetime.datetime.utcnow().timestamp() * 1_000_000))
-    will_return_status = "HTTP 204 No Content" if (passesUpdatedSince and not updated_serials) else "HTTP 200 OK"
-
-    summary_diag = (
-        "------------------------------------\n"
-        "[CHECK_UPDATED_PASSES SUMMARY]\n"
-        f"updated_serials before returning: {updated_serials}\n"
-        f"max_updated_ts: {max_updated_ts}\n"
-        f"lastUpdated value returned to Apple: {last_updated_tag}\n"
-        f"HTTP response that will be returned: {will_return_status}\n"
-        "------------------------------------"
-    )
-    logger.warning(summary_diag)
-    print(summary_diag, flush=True)
 
     if passesUpdatedSince and not updated_serials:
-        duration_ms = (time.time() - start_time) * 1000
-        exit_msg = f"[OTA LOGS] EXIT GET /devices | Status: 204 (No Updated Passes since {passesUpdatedSince}) | Duration: {duration_ms:.2f}ms"
-        logger.warning(exit_msg)
-        print(exit_msg, flush=True)
+        WalletLogger.log(
+            "info", "Apple Polling", "SUCCESS GET /devices", ctx,
+            status="204 No Content",
+            lastUpdated=last_updated_tag
+        )
         return Response(status_code=204)
 
-    duration_ms = (time.time() - start_time) * 1000
-    exit_msg = (
-        f"[OTA LOGS] EXIT GET /devices | Status: 200 | serialNumbers={updated_serials} | "
-        f"lastUpdated={last_updated_tag} | Duration: {duration_ms:.2f}ms"
+    WalletLogger.log(
+        "info", "Apple Polling", "SUCCESS GET /devices", ctx,
+        status="200 OK",
+        serialNumbers=updated_serials,
+        lastUpdated=last_updated_tag
     )
-    logger.warning(exit_msg)
-    print(exit_msg, flush=True)
 
     return {
         "lastUpdated": last_updated_tag,
@@ -384,33 +370,23 @@ def download_updated_passkit_pass(
     Serves the latest signed .pkpass bundle directly to Apple Wallet over the air.
     Optimized: Serves existing file directly without redundant regeneration unless file is missing.
     """
-    print("ENTER download_updated_passkit_pass", flush=True)
-    logger.warning("ENTER download_updated_passkit_pass")
-    start_time = time.time()
-    auth_present = bool(authorization)
-    auth_token = (authorization or "").replace("ApplePass ", "").strip()
+    from app.services.apple_wallet.telemetry import TraceContext, WalletLogger
+    ctx = TraceContext()
 
-    entry_msg = (
-        f"[OTA LOGS] ENTRY GET /passes | serial={serial_number} | "
-        f"pass_type={pass_type_identifier} | Auth Header Present: {auth_present}"
+    WalletLogger.log(
+        "info", "Apple Download", "START GET /passes", ctx,
+        serial_number=serial_number,
+        pass_type=pass_type_identifier
     )
-    logger.warning(entry_msg)
-    print(entry_msg, flush=True)
 
+    auth_token = (authorization or "").replace("ApplePass ", "").strip()
     pass_rec = db.query(WalletPass).filter(WalletPass.serial_number == serial_number).first()
-    auth_matched = bool(pass_rec and (not pass_rec.authentication_token or pass_rec.authentication_token == auth_token))
-
-    logger.warning(f"[OTA LOGS] Authentication token matched: {auth_matched}")
-    print(f"[OTA LOGS] Authentication token matched: {auth_matched}", flush=True)
 
     if not pass_rec or (pass_rec.authentication_token and pass_rec.authentication_token != auth_token):
-        duration_ms = (time.time() - start_time) * 1000
-        exit_msg = f"[OTA LOGS] EXIT GET /passes | Status: 401 Unauthorized | Duration: {duration_ms:.2f}ms"
-        logger.warning(exit_msg)
-        print(exit_msg, flush=True)
+        WalletLogger.log("error", "Apple Download", "FAILURE GET /passes Unauthorized", ctx, serial_number=serial_number)
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Only regenerate if file is missing on server disk (prevents redundant regenerations on every GET request)
+    # Only regenerate if file is missing on server disk
     if not pass_rec.pass_file_path or not Path(pass_rec.pass_file_path).exists():
         if pass_rec.customer_package_id:
             from app.models.customer_package import CustomerPackage
@@ -419,30 +395,25 @@ def download_updated_passkit_pass(
             if cp:
                 cust = db.query(User).filter(User.id == cp.customer_id).first()
                 try:
-                    logger.warning(f"[OTA LOGS] Pass file missing on disk, generating pass for {serial_number}")
-                    WalletService.update_wallet_pass_on_usage(db, cp, cust)
+                    WalletService.update_wallet_pass_on_usage(db, cp, cust, ctx=ctx)
                     db.refresh(pass_rec)
                 except Exception as e:
-                    logger.warning(f"[OTA LOGS] Could not regenerate pass before PassKit download: {e}")
+                    logger.warning(f"Could not regenerate pass before PassKit download: {e}")
 
     file_path = Path(pass_rec.pass_file_path) if pass_rec.pass_file_path else None
     file_exists = file_path.exists() if file_path else False
     file_size = file_path.stat().st_size if (file_exists and file_path) else 0
 
-    logger.warning(f"[OTA LOGS] File Path: {file_path} | Exists: {file_exists} | Size: {file_size} bytes")
-    print(f"[OTA LOGS] File Path: {file_path} | Exists: {file_exists} | Size: {file_size} bytes", flush=True)
-
     if not file_exists:
-        duration_ms = (time.time() - start_time) * 1000
-        exit_msg = f"[OTA LOGS] EXIT GET /passes | Status: 404 Not Found | Duration: {duration_ms:.2f}ms"
-        logger.warning(exit_msg)
-        print(exit_msg, flush=True)
+        WalletLogger.log("error", "Apple Download", "FAILURE GET /passes File Missing", ctx, serial_number=serial_number)
         raise HTTPException(status_code=404, detail="Pass file missing")
 
-    duration_ms = (time.time() - start_time) * 1000
-    exit_msg = f"[OTA LOGS] EXIT GET /passes | Status: 200 OK | Duration: {duration_ms:.2f}ms"
-    logger.warning(exit_msg)
-    print(exit_msg, flush=True)
+    WalletLogger.log(
+        "info", "Apple Download", "SUCCESS GET /passes", ctx,
+        serial_number=serial_number,
+        file_path=str(file_path),
+        size=f"{file_size} bytes"
+    )
 
     return FileResponse(
         path=file_path,

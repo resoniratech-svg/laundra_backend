@@ -177,178 +177,195 @@ def purchase_package(
     current_user: User = Depends(get_current_user) # Can be purchased by Customer or assigned by Admin
 ):
     """Customer purchases a prepaid package"""
-    pkg = db.query(PrepaidPackage).filter(
-        PrepaidPackage.id == payload.package_id,
-        PrepaidPackage.tenant_id == current_user.tenant_id
-    ).first()
-    
-    if not pkg:
-        raise HTTPException(status_code=404, detail="Package not found")
-        
-    activation_date = datetime.datetime.utcnow()
-    expiry_date = None
-    if pkg.validity_days:
-        expiry_date = activation_date + datetime.timedelta(days=pkg.validity_days)
-    elif pkg.expiry_date:
-        expiry_date = datetime.datetime.combine(pkg.expiry_date, datetime.time.max)
-        
-    discount = 0.0
-    final_price = float(pkg.offer_price)
-    if payload.coupon_code:
-        import datetime as dt
-        today = dt.date.today()
-        coupon = db.query(Coupon).filter(
-            Coupon.code == payload.coupon_code,
-            Coupon.tenant_id == current_user.tenant_id
+    from app.services.apple_wallet.telemetry import TraceContext, WalletLogger
+    ctx = TraceContext()
+    WalletLogger.log("info", "Purchase", "START Request", ctx, customer_id=payload.customer_id, package_id=payload.package_id)
+
+    try:
+        pkg = db.query(PrepaidPackage).filter(
+            PrepaidPackage.id == payload.package_id,
+            PrepaidPackage.tenant_id == current_user.tenant_id
         ).first()
-        if coupon:
-            if coupon.expiry_date and coupon.expiry_date < today:
-                raise HTTPException(status_code=400, detail="Coupon has expired")
-            if coupon.start_date and coupon.start_date > today:
-                raise HTTPException(status_code=400, detail="Coupon is not active yet")
+        
+        if not pkg:
+            WalletLogger.log("error", "Purchase", "FAILURE Request", ctx, customer_id=payload.customer_id, package_id=payload.package_id, error="Package not found")
+            raise HTTPException(status_code=404, detail="Package not found")
+        
+        activation_date = datetime.datetime.utcnow()
+        expiry_date = None
+        if pkg.validity_days:
+            expiry_date = activation_date + datetime.timedelta(days=pkg.validity_days)
+        elif pkg.expiry_date:
+            expiry_date = datetime.datetime.combine(pkg.expiry_date, datetime.time.max)
             
-            val = float(coupon.value)
-            if coupon.discount_type == "PERCENTAGE":
-                discount = final_price * (val / 100.0)
-            elif coupon.discount_type == "FLAT":
-                discount = val
+        discount = 0.0
+        final_price = float(pkg.offer_price)
+        if payload.coupon_code:
+            import datetime as dt
+            today = dt.date.today()
+            coupon = db.query(Coupon).filter(
+                Coupon.code == payload.coupon_code,
+                Coupon.tenant_id == current_user.tenant_id
+            ).first()
+            if coupon:
+                if coupon.expiry_date and coupon.expiry_date < today:
+                    raise HTTPException(status_code=400, detail="Coupon has expired")
+                if coupon.start_date and coupon.start_date > today:
+                    raise HTTPException(status_code=400, detail="Coupon is not active yet")
+                
+                val = float(coupon.value)
+                if coupon.discount_type == "PERCENTAGE":
+                    discount = final_price * (val / 100.0)
+                elif coupon.discount_type == "FLAT":
+                    discount = val
+                else:
+                    discount = 0.0
+                final_price = max(0.0, final_price - discount)
+
+        # 1. Save CustomerPackage Purchase (Wallet balance is the full original package value)
+        full_pkg_value = float(pkg.original_price) if pkg.original_price and float(pkg.original_price) > 0 else float(pkg.offer_price)
+
+        # Build dynamic service_items from the package's eligible_services
+        dynamic_service_items = resolve_service_items_from_package(db, pkg)
+
+        # Also populate legacy fixed columns for backward compat
+        w_tot, i_tot, d_tot, s_tot = 0, 0, 0, 0
+        for si in dynamic_service_items:
+            cat = si["service"].lower()
+            if "steam" in cat:
+                s_tot += si["total"]
+            elif "wash" in cat or "fold" in cat:
+                w_tot += si["total"]
+            elif "press" in cat or "iron" in cat:
+                i_tot += si["total"]
+            elif "dry" in cat or "premium" in cat:
+                d_tot += si["total"]
             else:
-                discount = 0.0
-            final_price = max(0.0, final_price - discount)
+                w_tot += si["total"]
 
-    # 1. Save CustomerPackage Purchase (Wallet balance is the full original package value)
-    full_pkg_value = float(pkg.original_price) if pkg.original_price and float(pkg.original_price) > 0 else float(pkg.offer_price)
-
-    # Build dynamic service_items from the package's eligible_services
-    dynamic_service_items = resolve_service_items_from_package(db, pkg)
-
-    # Also populate legacy fixed columns for backward compat
-    w_tot, i_tot, d_tot, s_tot = 0, 0, 0, 0
-    for si in dynamic_service_items:
-        cat = si["service"].lower()
-        if "steam" in cat:
-            s_tot += si["total"]
-        elif "wash" in cat or "fold" in cat:
-            w_tot += si["total"]
-        elif "press" in cat or "iron" in cat:
-            i_tot += si["total"]
-        elif "dry" in cat or "premium" in cat:
-            d_tot += si["total"]
-        else:
-            w_tot += si["total"]
-
-    customer_pkg = CustomerPackage(
-        id=uuid.uuid4(),
-        tenant_id=current_user.tenant_id,
-        customer_id=payload.customer_id,
-        package_id=pkg.id,
-        purchase_date=activation_date,
-        activation_date=activation_date,
-        expiry_date=expiry_date,
-        total_quantity=pkg.total_quantity,
-        used_quantity=0,
-        package_value=full_pkg_value,
-        current_balance=full_pkg_value,
-        used_amount=0.0,
-        pass_color="GOLD",
-        status="ACTIVE",
-        wash_total=w_tot,
-        wash_left=w_tot,
-        iron_total=i_tot,
-        iron_left=i_tot,
-        dry_total=d_tot,
-        dry_left=d_tot,
-        steam_total=s_tot,
-        steam_left=s_tot,
-        service_items=dynamic_service_items
-    )
-    db.add(customer_pkg)
-    db.commit()
-    db.refresh(customer_pkg)
-    
-    # Record Order in Order History for Package Purchase
-    try:
-        from app.models.order import Order
-        from app.models.order_item import OrderItem
-        from app.models.customer import Customer
-        
-        # Ensure customer exists in customers table
-        cust_rec = db.query(Customer).filter(
-            Customer.id == payload.customer_id,
-            Customer.tenant_id == current_user.tenant_id
-        ).first()
-        
-        if not cust_rec:
-            user_rec = db.query(User).filter(User.id == payload.customer_id).first()
-            if user_rec:
-                cust_rec = Customer(
-                    id=user_rec.id,
-                    tenant_id=current_user.tenant_id,
-                    name=user_rec.name,
-                    phone=user_rec.phone,
-                    email=user_rec.email,
-                    wallet_balance=Decimal("0.0"),
-                    loyalty_points=0,
-                    qr_secret=uuid.uuid4().hex
-                )
-                db.add(cust_rec)
-                db.commit()
-
-        if cust_rec:
-            new_order_id = uuid.uuid4()
-            now_time = datetime.datetime.utcnow()
-            ord_num = f"ORD-PKG-{now_time.strftime('%Y%m%d')}-{str(new_order_id)[:4].upper()}"
-            
-            new_order = Order(
-                id=new_order_id,
-                tenant_id=current_user.tenant_id,
-                customer_id=cust_rec.id,
-                order_number=ord_num,
-                status="COMPLETED",
-                payment_status="PAID",
-                total_amount=Decimal(str(final_price)),
-                discount=Decimal(str(discount)),
-                paid_amount=Decimal(str(final_price)),
-                special_instructions=f"Purchased Prepaid Package: {pkg.name}",
-                created_at=now_time,
-                updated_at=now_time
-            )
-            db.add(new_order)
-            db.commit()
-    except Exception as e_ord:
-        import logging
-        logging.getLogger(__name__).error(f"Could not record order for package purchase: {e_ord}")
-    
-    customer_pkg = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(CustomerPackage.id == customer_pkg.id).first()
-    customer = db.query(User).filter(User.id == payload.customer_id).first()
-    company_name = getattr(current_user, 'company', None).name if getattr(current_user, 'company', None) else "Laundra Laundry"
-
-    # 2. Orchestrate Google Wallet, Apple Wallet, QR Code Creation & DB Persistence
-    wallet_status = {"google_wallet": False, "apple_wallet": False, "qr_code": False}
-    try:
-        wallet_status = WalletService.create_and_save_wallet_pass(
-            db=db,
-            package=customer_pkg,
-            customer=customer,
-            company_name=company_name
+        customer_pkg = CustomerPackage(
+            id=uuid.uuid4(),
+            tenant_id=current_user.tenant_id,
+            customer_id=payload.customer_id,
+            package_id=pkg.id,
+            purchase_date=activation_date,
+            activation_date=activation_date,
+            expiry_date=expiry_date,
+            total_quantity=pkg.total_quantity,
+            used_quantity=0,
+            package_value=full_pkg_value,
+            current_balance=full_pkg_value,
+            used_amount=0.0,
+            pass_color="GOLD",
+            status="ACTIVE",
+            wash_total=w_tot,
+            wash_left=w_tot,
+            iron_total=i_tot,
+            iron_left=i_tot,
+            dry_total=d_tot,
+            dry_left=d_tot,
+            steam_total=s_tot,
+            steam_left=s_tot,
+            service_items=dynamic_service_items
         )
+        db.add(customer_pkg)
+        db.commit()
         db.refresh(customer_pkg)
-
-    except Exception as e:
-        db.rollback()
-        import logging
-        logging.getLogger(__name__).error(f"Could not generate wallet pass for package {customer_pkg.id}: {e}")
-
-    # 3. Trigger WhatsApp Notification
-    if customer:
-        try:
-            WhatsAppService.send_package_activated_message(customer, customer_pkg)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"Failed to send WhatsApp notification for package {customer_pkg.id}: {e}")
         
-    setattr(customer_pkg, "wallet_generation", wallet_status)
-    return customer_pkg
+        # Record Order in Order History for Package Purchase
+        try:
+            from app.models.order import Order
+            from app.models.order_item import OrderItem
+            from app.models.customer import Customer
+            
+            # Ensure customer exists in customers table
+            cust_rec = db.query(Customer).filter(
+                Customer.id == payload.customer_id,
+                Customer.tenant_id == current_user.tenant_id
+            ).first()
+            
+            if not cust_rec:
+                user_rec = db.query(User).filter(User.id == payload.customer_id).first()
+                if user_rec:
+                    cust_rec = Customer(
+                        id=user_rec.id,
+                        tenant_id=current_user.tenant_id,
+                        name=user_rec.name,
+                        phone=user_rec.phone,
+                        email=user_rec.email,
+                        wallet_balance=Decimal("0.0"),
+                        loyalty_points=0,
+                        qr_secret=uuid.uuid4().hex
+                    )
+                    db.add(cust_rec)
+                    db.commit()
+
+            if cust_rec:
+                new_order_id = uuid.uuid4()
+                now_time = datetime.datetime.utcnow()
+                ord_num = f"ORD-PKG-{now_time.strftime('%Y%m%d')}-{str(new_order_id)[:4].upper()}"
+                
+                new_order = Order(
+                    id=new_order_id,
+                    tenant_id=current_user.tenant_id,
+                    customer_id=cust_rec.id,
+                    order_number=ord_num,
+                    status="COMPLETED",
+                    payment_status="PAID",
+                    total_amount=Decimal(str(final_price)),
+                    discount=Decimal(str(discount)),
+                    paid_amount=Decimal(str(final_price)),
+                    special_instructions=f"Purchased Prepaid Package: {pkg.name}",
+                    created_at=now_time,
+                    updated_at=now_time
+                )
+                db.add(new_order)
+                db.commit()
+        except Exception as e_ord:
+            import logging
+            logging.getLogger(__name__).error(f"Could not record order for package purchase: {e_ord}")
+        
+        customer_pkg = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(CustomerPackage.id == customer_pkg.id).first()
+        customer = db.query(User).filter(User.id == payload.customer_id).first()
+        company_name = getattr(current_user, 'company', None).name if getattr(current_user, 'company', None) else "Laundra Laundry"
+
+        # 2. Orchestrate Google Wallet, Apple Wallet, QR Code Creation & DB Persistence
+        wallet_status = {"google_wallet": False, "apple_wallet": False, "qr_code": False}
+        try:
+            wallet_status = WalletService.create_and_save_wallet_pass(
+                db=db,
+                package=customer_pkg,
+                customer=customer,
+                company_name=company_name,
+                ctx=ctx
+            )
+            db.refresh(customer_pkg)
+
+        except Exception as e:
+            db.rollback()
+            import logging
+            logging.getLogger(__name__).error(f"Could not generate wallet pass for package {customer_pkg.id}: {e}")
+
+        # 3. Trigger WhatsApp Notification
+        if customer:
+            try:
+                WhatsAppService.send_package_activated_message(customer, customer_pkg)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to send WhatsApp notification for package {customer_pkg.id}: {e}")
+            
+        setattr(customer_pkg, "wallet_generation", wallet_status)
+        WalletLogger.log(
+            "info", "Purchase", "SUCCESS Request", ctx,
+            customer_id=payload.customer_id,
+            package_id=payload.package_id,
+            customer_package_id=customer_pkg.id,
+            final_price=f"{final_price:.2f}"
+        )
+        return customer_pkg
+    except Exception as e:
+        WalletLogger.log("error", "Purchase", "FAILURE Request", ctx, customer_id=payload.customer_id, package_id=payload.package_id, error=str(e))
+        raise
 
 from app.schemas.prepaid_package import CustomerPackageDeductRequest
 
@@ -414,6 +431,19 @@ def deduct_package_usage(
     current_user: User = Depends(get_current_user)
 ):
     """Deduct package usage from CustomerPackage database record and trigger Apple Wallet OTA update"""
+    from app.services.apple_wallet.telemetry import TraceContext, WalletLogger
+    ctx = TraceContext()
+    ctx.mark_stage("deduction_start")
+
+    WalletLogger.log(
+        "info", "Deduction", "START Request", ctx,
+        customer_id=payload.customer_id,
+        customer_package_id=payload.customer_package_id,
+        amount_used=payload.amount_used,
+        wash_used=payload.wash_used,
+        iron_used=payload.iron_used
+    )
+
     cp = None
     if payload.customer_package_id:
         cp = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
@@ -429,6 +459,7 @@ def deduct_package_usage(
         ).order_by(CustomerPackage.purchase_date.desc()).first()
 
     if not cp:
+        WalletLogger.log("error", "Deduction", "FAILURE Request", ctx, error="Active customer package not found")
         raise HTTPException(status_code=404, detail="Active customer package not found")
 
     # --- Dynamic service_items deduction (primary path) ---
@@ -578,10 +609,17 @@ def deduct_package_usage(
     # Regenerate Pass & dispatch async APNs push
     customer = db.query(User).filter(User.id == cp.customer_id).first()
     try:
-        WalletService.update_wallet_pass_on_usage(db, cp, customer, background_tasks=background_tasks)
+        WalletService.update_wallet_pass_on_usage(db, cp, customer, background_tasks=background_tasks, ctx=ctx)
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).exception(f"Error updating wallet pass on usage: {e}")
+        WalletLogger.log("error", "Deduction", "FAILURE Wallet Pass Update", ctx, error=str(e))
+
+    WalletLogger.log(
+        "info", "Deduction", "SUCCESS Request", ctx,
+        customer_id=cp.customer_id,
+        customer_package_id=cp.id,
+        status=cp.status,
+        remaining_balance=f"QR {float(cp.current_balance or 0.0):.2f}"
+    )
 
     return cp
 

@@ -103,16 +103,21 @@ class APNsService:
             logger.error(f"[APNs] Error preparing PEM credentials: {e}")
             return False
 
-    def send_push_notification(self, push_token: str) -> Dict[str, Any]:
+    def send_push_notification(self, push_token: str, ctx: Optional[Any] = None) -> Dict[str, Any]:
         """
         Sends an empty APNs notification payload ({}) over HTTP/2 using persistent session.
         Auto-reconnects if connection was closed by Apple.
         """
+        from app.services.apple_wallet.telemetry import TraceContext, WalletLogger
+        if not ctx:
+            ctx = TraceContext()
 
         if not push_token:
+            WalletLogger.log("warning", "APNs", "FAILURE Empty Token", ctx)
             return {"success": False, "reason": "empty_token", "expired": False}
 
         if not self._ensure_pem_credentials():
+            WalletLogger.log("error", "APNs", "FAILURE Credentials Failed", ctx)
             return {"success": False, "reason": "credentials_failed", "expired": False}
 
         import time
@@ -129,13 +134,13 @@ class APNsService:
         }
         body = "{}"
 
-        logger.info(
-            f"[APNs] Dispatching HTTP/2 push request | "
-            f"apns-topic={headers['apns-topic']} | "
-            f"apns-push-type={headers['apns-push-type']} | "
-            f"apns-priority={headers['apns-priority']} | "
-            f"apns-expiration={headers['apns-expiration']} | "
-            f"Host={self.apns_host}"
+        WalletLogger.log(
+            "info", "APNs", "HTTP/2 Request", ctx,
+            push_token=WalletLogger.mask(push_token),
+            topic=headers["apns-topic"],
+            push_type=headers["apns-push-type"],
+            priority=headers["apns-priority"],
+            expiration=headers["apns-expiration"]
         )
 
         try:
@@ -148,10 +153,9 @@ class APNsService:
                 client = self._get_client()
                 response = client.post(url, headers=headers, content=body)
 
-
             if response.status_code == 200:
                 apns_id = response.headers.get("apns-id", "N/A")
-                logger.info(f"[APNs] Push SUCCESS (200 OK) for token {push_token[:10]}... [apns-id: {apns_id}]")
+                WalletLogger.log("info", "APNs", "SUCCESS Response", ctx, status="200 OK", apns_id=apns_id)
                 return {"success": True, "reason": "ok", "expired": False, "apns_id": apns_id}
             
             elif response.status_code in [400, 410]:

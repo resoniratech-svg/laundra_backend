@@ -3,7 +3,7 @@ import uuid
 import datetime
 import logging
 from sqlalchemy.orm import Session
-from typing import Optional, Union
+from typing import Optional, Union, Any
 
 from app.core.config import settings
 from app.models.customer_package import CustomerPackage
@@ -125,12 +125,19 @@ class WalletService:
         db: Session,
         package: CustomerPackage,
         customer: Optional[User] = None,
-        company_name: str = "Laundra Laundry"
+        company_name: str = "Laundra Laundry",
+        ctx: Optional[Any] = None
     ) -> dict:
         """
         Phase 9 & Phase 10: Purchase Orchestrator
         Generates QR Code, Apple Wallet, Google Wallet and persists metadata.
         """
+        from app.services.apple_wallet.telemetry import TraceContext, WalletLogger
+        if not ctx:
+            ctx = TraceContext()
+
+        WalletLogger.log("info", "WalletPass", "START DB Creation", ctx, customer_id=package.customer_id, package_id=package.id)
+
         status = {"google_wallet": False, "apple_wallet": False, "qr_code": False}
         cust_name = customer.name if customer else "Customer"
         pkg_title = package.package.name if hasattr(package, 'package') and package.package else "Prepaid Package"
@@ -171,6 +178,13 @@ class WalletService:
                 )
                 db.add(wallet_pass)
                 db.flush()
+                WalletLogger.log(
+                    "info", "WalletPass", "SUCCESS DB Creation", ctx,
+                    wallet_pass_id=wallet_pass.id,
+                    serial_number=serial_str,
+                    auth_token=WalletLogger.mask(auth_tok),
+                    initial_updated_at=wallet_pass.wallet_updated_at or wallet_pass.created_at
+                )
             else:
                 wallet_pass.customer_package_id = package.id
                 wallet_pass.original_amount = float(package.package_value or 0.0)
@@ -273,10 +287,7 @@ class WalletService:
         try:
             from app.services.apple_wallet.apns_service import APNsService
             apns = APNsService()
-            logger.info(f"[OTA Lifecycle] Querying registered iOS devices for serial_number={serial_num}")
-            logger.warning(f"[DEBUG] ABOUT TO SEND APNS serial={serial_num}")
             summary = apns.notify_devices_for_pass(db, serial_num)
-            logger.warning(f"[DEBUG] APNS CALL FINISHED serial={serial_num} summary={summary}")
             logger.info(f"[OTA Lifecycle] APNs push lifecycle completed for {serial_num}: {summary}")
             return summary
         except Exception as e_apns:
@@ -288,23 +299,20 @@ class WalletService:
         db: Session,
         package: CustomerPackage,
         customer: Optional[User] = None,
-        background_tasks=None
+        background_tasks=None,
+        ctx: Optional[Any] = None
     ):
         """
         Automatic Wallet Updates when balance/washes decrease, package is renewed, or status changes.
         Regenerates PKPass with dynamic card theme.
-
-        Critical Path (synchronous, before HTTP 200):
-          1. Resolve WalletPass
-          2. Generate .pkpass (signed, zipped)
-          3. Save pass to disk
-          4. Update WalletPass record in DB
-          5. Commit WalletPass
-
-        Background Task (async, after HTTP 200):
-          6. Send APNs push notification (with exponential backoff retry)
         """
-        logger.info("[Wallet] ENTERED update_wallet_pass_on_usage package_id=%s", package.id)
+        from app.services.apple_wallet.telemetry import TraceContext, WalletLogger
+        if not ctx:
+            ctx = TraceContext()
+
+        ctx.mark_stage("pass_regen_start")
+        WalletLogger.log("info", "OTA", "START Workflow", ctx, package_id=package.id, customer_id=package.customer_id)
+
         try:
             cust_name = customer.name if customer else "Customer"
             wallet_pass = WalletService.resolve_wallet_pass(
@@ -320,6 +328,19 @@ class WalletService:
             if wallet_pass:
                 wallet_pass.pass_status = package.status or "ACTIVE"
 
+            # Log DB State BEFORE Commit
+            if wallet_pass:
+                WalletLogger.log_db_diff(
+                    ctx=ctx,
+                    entity_name="WalletPass",
+                    entity_id=wallet_pass.id,
+                    stage="BEFORE",
+                    updated_at=wallet_pass.updated_at,
+                    balance=bal_str,
+                    status=wallet_pass.status,
+                    remaining_items=package.wash_left
+                )
+
             # Synchronous: Regenerate pass (generate JSON, sign, zip, save to disk)
             WalletService.generate_real_apple_wallet_pass(
                 db=db,
@@ -331,10 +352,9 @@ class WalletService:
                 expiry_date=exp_str,
                 wallet_pass=wallet_pass,
                 package_secure_token=package.secure_token,
-                package_obj=package
+                package_obj=package,
+                ctx=ctx
             )
-            logger.info(f"[OTA Lifecycle] 1. Package updated: package_id={package.id}, status={package.status}")
-            logger.info(f"[OTA Lifecycle] 2. Pass regenerated for package_id={package.id}")
 
             # Mark sync status as PENDING before committing (APNs push is deferred)
             if wallet_pass:
@@ -351,7 +371,18 @@ class WalletService:
                 except Exception:
                     pass
 
-            logger.info(f"[OTA Lifecycle] 3. WalletPass committed to DB for package_id={package.id}")
+            # Log DB State AFTER Commit
+            if wallet_pass:
+                WalletLogger.log_db_diff(
+                    ctx=ctx,
+                    entity_name="WalletPass",
+                    entity_id=wallet_pass.id,
+                    stage="AFTER",
+                    updated_at=wallet_pass.updated_at,
+                    balance=bal_str,
+                    status=wallet_pass.status,
+                    remaining_items=package.wash_left
+                )
 
             # Dispatch APNs push notification as background task
             serial_num = None
@@ -359,53 +390,48 @@ class WalletService:
                 serial_num = wallet_pass.serial_number or wallet_pass.apple_serial_number
             wallet_pass_id = str(wallet_pass.id) if wallet_pass else None
             tenant_id = str(package.tenant_id)
+            tr_id = ctx.trace_id
 
             if background_tasks and serial_num:
                 background_tasks.add_task(
                     WalletService._async_apns_with_retry,
                     serial_number=serial_num,
                     wallet_pass_id=wallet_pass_id,
-                    tenant_id=tenant_id
+                    tenant_id=tenant_id,
+                    trace_id=tr_id
                 )
-                logger.info(f"[OTA Lifecycle] 4. APNs push dispatched to background task for serial={serial_num}")
+                WalletLogger.log("info", "OTA", "APNs Dispatched to Background", ctx, serial_number=serial_num)
             elif serial_num:
                 # Fallback: send synchronously if no background_tasks available
                 WalletService._notify_wallet_update(db, wallet_pass)
-                logger.info(f"[OTA Lifecycle] 4. APNs push sent synchronously (no BackgroundTasks) for serial={serial_num}")
+                WalletLogger.log("info", "OTA", "APNs Dispatched Synchronously", ctx, serial_number=serial_num)
             else:
-                logger.warning("[OTA Lifecycle] 4. Skipped APNs push: no serial_number on WalletPass")
+                WalletLogger.log("warning", "OTA", "Skipped APNs Push (No Serial)", ctx)
 
         except Exception as e:
             logger.exception(f"Error updating wallet pass for package {package.id}: {e}")
-            db.rollback()
-
     @staticmethod
     def _async_apns_with_retry(
         serial_number: str,
         wallet_pass_id: str,
         tenant_id: str,
         max_attempts: int = 4,
-        backoff_schedule: list = None
+        backoff_schedule: list = None,
+        trace_id: Optional[str] = None
     ):
         """
         Background task: Send APNs push notification with exponential backoff retry.
-
-        Schedule:
-          Attempt 1: Immediately
-          Attempt 2: 30 seconds
-          Attempt 3: 2 minutes (120 seconds)
-          Attempt 4: 10 minutes (600 seconds)
-
-        On success: wallet_sync_status = SYNCED
-        On final failure: wallet_sync_status = FAILED, wallet_sync_error = <error details>
         """
         import time as _time
         from app.core.database import SessionLocal
+        from app.services.apple_wallet.telemetry import TraceContext, WalletLogger
+
+        ctx = TraceContext(trace_id=trace_id) if trace_id else TraceContext()
 
         if backoff_schedule is None:
             backoff_schedule = [0, 30, 120, 600]
 
-        logger.info(f"[APNs Background] Starting async APNs push for serial={serial_number}")
+        WalletLogger.log("info", "APNs", "START Background Push", ctx, serial_number=serial_number)
 
         for attempt in range(1, max_attempts + 1):
             wait_seconds = backoff_schedule[attempt - 1] if attempt - 1 < len(backoff_schedule) else 600
@@ -505,7 +531,8 @@ class WalletService:
         order_id: Optional[uuid.UUID] = None,
         wallet_pass: Optional['WalletPass'] = None,
         package_secure_token: Optional[str] = None,
-        package_obj: Optional[CustomerPackage] = None
+        package_obj: Optional[CustomerPackage] = None,
+        ctx: Optional[Any] = None
     ) -> dict:
         from app.services.apple_wallet.pass_service import PassService
         from app.schemas.apple_wallet import LaundryPassData
@@ -583,7 +610,7 @@ class WalletService:
         )
 
         pass_service = PassService()
-        pkpass_path = pass_service.generate_pkpass(pass_data, serial_number=serial_number)
+        pkpass_path = pass_service.generate_pkpass(pass_data, serial_number=serial_number, ctx=ctx)
 
         pass_sec_token = package_secure_token or (package_obj.secure_token if package_obj else None) or serial_number
         pass_url = f"/api/v1/wallet/apple/pass/{pass_sec_token}"

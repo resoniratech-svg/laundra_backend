@@ -60,36 +60,46 @@ def create_user(
     db: Session = Depends(get_db)
 ):
     from app.api.v1.auth import MOCK_OTP_STORE
+    from app.services.apple_wallet.telemetry import TraceContext, WalletLogger
+
+    ctx = TraceContext()
+    WalletLogger.log("info", "Customer", "START Create", ctx, email=user_in.email, role=user_in.role)
     
-    if not user_in.email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email is required to verify OTP"
-        )
+    try:
+        if not user_in.email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email is required to verify OTP"
+            )
+            
+        stored_otp = MOCK_OTP_STORE.get(user_in.email)
+        if not stored_otp or stored_otp != user_in.otp:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired OTP code"
+            )
+            
+        existing_user = db.query(User).filter(User.email == user_in.email).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered"
+            )
         
-    stored_otp = MOCK_OTP_STORE.get(user_in.email)
-    if not stored_otp or stored_otp != user_in.otp:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired OTP code"
-        )
+        obj_data = user_in.model_dump()
+        obj_data.pop("otp", None)
+        obj_data["password"] = get_password_hash(obj_data["password"])
+        obj_data["id"] = uuid4()
+        obj_data["tenant_id"] = current_admin.tenant_id
         
-    existing_user = db.query(User).filter(User.email == user_in.email).first()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
-    
-    obj_data = user_in.model_dump()
-    obj_data.pop("otp", None)
-    obj_data["password"] = get_password_hash(obj_data["password"])
-    obj_data["id"] = uuid4()
-    obj_data["tenant_id"] = current_admin.tenant_id
-    
-    user = user_repo.create(db, obj_in=obj_data)
-    MOCK_OTP_STORE.pop(user_in.email, None)
-    return user
+        user = user_repo.create(db, obj_in=obj_data)
+        MOCK_OTP_STORE.pop(user_in.email, None)
+
+        WalletLogger.log("info", "Customer", "SUCCESS Create", ctx, customer_id=user.id, email=user.email, role=user.role)
+        return user
+    except Exception as e:
+        WalletLogger.log("error", "Customer", "FAILURE Create", ctx, email=user_in.email, error=str(e))
+        raise
 
 @router.get("", response_model=List[UserOut])
 def list_users(

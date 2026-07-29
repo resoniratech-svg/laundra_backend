@@ -3,6 +3,7 @@ import logging
 import shutil
 import uuid
 from pathlib import Path
+from datetime import datetime
 from typing import Dict, Any, Optional
 
 from app.core.config import settings
@@ -321,40 +322,53 @@ class PassService:
 
         return output_file
 
-    def generate_pkpass(self, pass_data: LaundryPassData, serial_number: Optional[str] = None) -> Path:
+    def generate_pkpass(self, pass_data: LaundryPassData, serial_number: Optional[str] = None, ctx: Optional[Any] = None) -> Path:
+        from app.services.apple_wallet.telemetry import TraceContext, WalletLogger
+        if not ctx:
+            ctx = TraceContext()
+
         s_num = serial_number or f"PASS-{uuid.uuid4().hex[:8].upper()}"
         filename = f"pass_{s_num}.pkpass"
         output_base = Path(settings.APPLE_WALLET_GENERATED_PATH)
 
+        WalletLogger.log("info", "PKPass", "START Generation", ctx, serial_number=s_num)
+
         try:
             with temporary_directory(output_base, prefix=s_num) as temp_dir:
-                logger.info(f"Temp directory: {temp_dir}")
-
                 # 1
                 self.output = temp_dir
-                self.generate(pass_data, serial_number=s_num)
-                logger.info("pass.json generated")
+                pass_json_path = self.generate(pass_data, serial_number=s_num)
+                WalletLogger.log("info", "PKPass", "pass.json Created", ctx, path=str(pass_json_path))
 
                 # 2
                 self.image_service.prepare_pass_images(temp_dir)
-                logger.info("Images copied")
 
                 # 3
-                ManifestService.create_manifest_file(temp_dir)
-                logger.info("Manifest created")
+                manifest_path = ManifestService.create_manifest_file(temp_dir)
+                WalletLogger.log("info", "PKPass", "manifest.json Created", ctx, path=str(manifest_path))
 
                 # 4
                 signing_svc = SigningService(temp_dir)
                 signing_svc.sign()
-                logger.info("Manifest signed")
+                WalletLogger.log("info", "PKPass", "Manifest Signed", ctx, serial_number=s_num)
 
                 # 5
                 pkg_svc = PackageService(temp_dir)
                 pkpass_file = pkg_svc.package(custom_filename=filename)
-                logger.info(f"PKPASS created: {pkpass_file}")
+
+                f_size = pkpass_file.stat().st_size if pkpass_file.exists() else 0
+                f_mtime = datetime.fromtimestamp(pkpass_file.stat().st_mtime).isoformat() if pkpass_file.exists() else "N/A"
+
+                WalletLogger.log(
+                    "info", "PKPass", "SUCCESS PKPASS Generated", ctx,
+                    serial_number=s_num,
+                    file_path=str(pkpass_file),
+                    size=f"{f_size} bytes",
+                    mtime=f_mtime
+                )
 
                 return pkpass_file
 
-        except Exception:
-            logger.exception("generate_pkpass FAILED")
+        except Exception as e:
+            WalletLogger.log("error", "PKPass", "FAILURE PKPASS Generation", ctx, serial_number=s_num, error=str(e))
             raise
