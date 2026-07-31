@@ -22,7 +22,13 @@ class GoogleWalletAuthService:
             os.path.abspath(configured_path),
             os.path.join(os.getcwd(), configured_path),
             os.path.join(os.getcwd(), "secrets", "google-wallet.json"),
+            os.path.join(os.getcwd(), "secrets", "laundry-wallet-503005-01c140c9a630.json"),
             os.path.join(os.getcwd(), "laundry-wallet-503005-01c140c9a630.json"),
+            "/workspace/secrets/laundry-wallet-503005-01c140c9a630.json",
+            "/workspace/secrets/google-wallet.json",
+            "/app/secrets/google-wallet.json",
+            "/secrets/google-wallet.json",
+            "/secrets/laundry-wallet-503005-01c140c9a630.json",
         ]
         
         for candidate in candidates:

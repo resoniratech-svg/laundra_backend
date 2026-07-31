@@ -88,6 +88,14 @@ def get_google_wallet_pass_redirect(
             customer=customer,
             company=company
         )
+        if not res.get("success"):
+            err_msg = res.get("error") or "Google Wallet pass URL generation failed"
+            logger.error(f"[GoogleWallet API] Pass generation error for package {pkg.id}: {err_msg}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Google Wallet pass generation failed: {err_msg}"
+            )
+
         save_url = res.get("raw_save_url") or res.get("google_wallet_url")
         if save_url and save_url.startswith("http"):
             logger.info(f"[GoogleWallet API] Successfully redirecting package {pkg.id} to Google Wallet Save URL")
@@ -98,6 +106,8 @@ def get_google_wallet_pass_redirect(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Google Wallet pass URL generation failed"
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"[GoogleWallet API] Error generating Google Wallet pass for {token_or_id}: {e}")
         raise HTTPException(
