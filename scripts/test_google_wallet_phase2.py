@@ -158,7 +158,7 @@ def run_phase2_verification():
         save_url = GoogleWalletJwtService.generate_save_url(object_payload=fetched_obj)
         summary["jwt_signing"] = "PASS"
         summary["save_url"] = "GENERATED"
-        summary["google_wallet_url"] = save_url
+        summary["google_wallet_url"] = "https://pay.google.com/gp/v/save/[REDACTED_JWT]"
         print("[OK] JWT Signing Successful. Save to Google Wallet URL Generated.")
 
         # 8. Database Storage Verification

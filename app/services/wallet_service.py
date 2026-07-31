@@ -53,9 +53,9 @@ class WalletService:
                     pass
 
             if cp:
-                wp = db.query(WalletPass).filter(WalletPass.customer_id == cp.customer_id).order_by(WalletPass.created_at.desc()).first()
-                if not wp and cp.id:
-                    wp = db.query(WalletPass).filter(WalletPass.customer_package_id == cp.id).first()
+                wp = db.query(WalletPass).filter(WalletPass.customer_package_id == cp.id).first()
+                if not wp and cp.customer_id:
+                    wp = db.query(WalletPass).filter(WalletPass.customer_id == cp.customer_id).order_by(WalletPass.created_at.desc()).first()
                 if wp:
                     return wp
 
@@ -92,22 +92,22 @@ class WalletService:
             if wallet_pass:
                 return wallet_pass
 
+        if customer_package_id:
+            cp_uuid = uuid.UUID(str(customer_package_id)) if isinstance(customer_package_id, str) else customer_package_id
+            wallet_pass = (
+                db.query(WalletPass)
+                .filter(WalletPass.customer_package_id == cp_uuid)
+                .first()
+            )
+            if wallet_pass:
+                return wallet_pass
+
         if customer_id:
             c_uuid = uuid.UUID(str(customer_id)) if isinstance(customer_id, str) else customer_id
             wallet_pass = (
                 db.query(WalletPass)
                 .filter(WalletPass.customer_id == c_uuid)
                 .order_by(WalletPass.created_at.desc())
-                .first()
-            )
-            if wallet_pass:
-                return wallet_pass
-
-        if customer_package_id:
-            cp_uuid = uuid.UUID(str(customer_package_id)) if isinstance(customer_package_id, str) else customer_package_id
-            wallet_pass = (
-                db.query(WalletPass)
-                .filter(WalletPass.customer_package_id == cp_uuid)
                 .first()
             )
             if wallet_pass:

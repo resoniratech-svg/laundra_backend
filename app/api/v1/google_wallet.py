@@ -29,18 +29,32 @@ def get_google_wallet_pass_redirect(
     Validates package identifier, fetches/reuses the Google Wallet GenericObject,
     generates a fresh signed Save-to-Google-Wallet JWT URL, and performs an HTTP 307 Redirect.
     """
+    clean_token = token_or_id.replace("customer/", "").strip()
     pkg = None
 
     # 1. Try matching UUID package ID
     try:
-        val_uuid = UUID(token_or_id)
+        val_uuid = UUID(clean_token)
         pkg = db.query(CustomerPackage).filter(CustomerPackage.id == val_uuid).first()
     except Exception:
         pass
 
     # 2. Try matching secure_token
     if not pkg:
-        pkg = db.query(CustomerPackage).filter(CustomerPackage.secure_token == token_or_id).first()
+        pkg = db.query(CustomerPackage).filter(CustomerPackage.secure_token == clean_token).first()
+
+    # 3. Centralized WalletPass lookup fallback
+    if not pkg:
+        from app.services.wallet_service import WalletService
+        wp = WalletService.resolve_wallet_pass(db, identifier=clean_token)
+        if wp:
+            if wp.customer_package_id:
+                pkg = db.query(CustomerPackage).filter(CustomerPackage.id == wp.customer_package_id).first()
+            if not pkg and wp.customer_id:
+                pkg = db.query(CustomerPackage).filter(
+                    CustomerPackage.customer_id == wp.customer_id,
+                    CustomerPackage.status.in_(["ACTIVE", "IN_USE"])
+                ).order_by(CustomerPackage.purchase_date.desc()).first()
 
     if not pkg:
         logger.warning(f"[GoogleWallet API] CustomerPackage not found for identifier: {token_or_id}")

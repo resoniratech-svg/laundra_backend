@@ -60,8 +60,8 @@ class GoogleWalletPassService:
 
             wallet_pass = WalletService.resolve_wallet_pass(
                 db=db,
-                customer_id=package.customer_id,
-                customer_package_id=package.id
+                customer_package_id=package.id,
+                customer_id=package.customer_id
             )
 
             now_dt = datetime.datetime.utcnow()
