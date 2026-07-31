@@ -226,6 +226,15 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 17 failed: {e}")
 
+# Isolated migration 18 – fix wallet_passes foreign key constraint to ON DELETE SET NULL & DROP NOT NULL
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE wallet_passes ALTER COLUMN customer_package_id DROP NOT NULL;"))
+        conn.execute(text("ALTER TABLE wallet_passes DROP CONSTRAINT IF EXISTS wallet_passes_customer_package_id_fkey;"))
+        conn.execute(text("ALTER TABLE wallet_passes ADD CONSTRAINT wallet_passes_customer_package_id_fkey FOREIGN KEY (customer_package_id) REFERENCES customer_packages(id) ON DELETE SET NULL;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 18 failed: {e}")
+
 try:
     import alembic.config
     import alembic.command

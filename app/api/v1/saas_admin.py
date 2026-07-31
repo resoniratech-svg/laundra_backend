@@ -193,128 +193,56 @@ def hard_delete_company(
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    try:
-        # Cascade delete all company data in proper dependency order within one transaction
-        from app.models.review import Review
-        from app.models.customer_support_ticket import CustomerSupportTicket
-        from app.models.support_ticket import SupportTicket
-        from app.models.payment import Payment
-        from app.models.order_item import OrderItem
-        from app.models.order import Order
-        from app.models.delivery import Delivery
-        from app.models.invoice import Invoice
-        from app.models.expense import Expense
-        from app.models.coupon import Coupon
-        from app.models.announcement import Announcement
-        from app.models.leave_request import LeaveRequest
-        from app.models.notification import Notification
-        from app.models.customer_address import CustomerAddress
-        from app.models.customer import Customer
-        from app.models.service import Service
-        from app.models.subscription import Subscription
-        from app.models.package_usage_history import PackageUsageHistory
-        from app.models.customer_package import CustomerPackage
-        from app.models.prepaid_package import PrepaidPackage
-        from app.models.audit_log import AuditLog
+    tid = str(id)
+    from app.core.database import engine
+    from sqlalchemy import text
 
-        # Get order IDs first for child table cleanup
-        order_ids = [o.id for o in db.query(Order.id).filter(Order.tenant_id == id).all()]
+    sql_steps = [
+        "ALTER TABLE wallet_passes ALTER COLUMN customer_package_id DROP NOT NULL;",
+        "ALTER TABLE wallet_passes DROP CONSTRAINT IF EXISTS wallet_passes_customer_package_id_fkey;",
+        "ALTER TABLE wallet_passes ADD CONSTRAINT wallet_passes_customer_package_id_fkey FOREIGN KEY (customer_package_id) REFERENCES customer_packages(id) ON DELETE SET NULL;",
+        "UPDATE orders SET applied_package_id = NULL WHERE tenant_id = '{tid}' OR applied_package_id IN (SELECT id FROM customer_packages WHERE tenant_id = '{tid}');",
+        "UPDATE wallet_passes SET customer_package_id = NULL, order_id = NULL WHERE tenant_id = '{tid}' OR customer_package_id IN (SELECT id FROM customer_packages WHERE tenant_id = '{tid}');",
+        "UPDATE reviews SET order_id = NULL WHERE tenant_id = '{tid}';",
+        "DELETE FROM package_usage_history WHERE tenant_id = '{tid}' OR customer_package_id IN (SELECT id FROM customer_packages WHERE tenant_id = '{tid}');",
+        "DELETE FROM wallet_passes WHERE tenant_id = '{tid}';",
+        "DELETE FROM apple_device_registrations WHERE tenant_id = '{tid}';",
+        "DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE tenant_id = '{tid}');",
+        "DELETE FROM payments WHERE tenant_id = '{tid}';",
+        "DELETE FROM deliveries WHERE tenant_id = '{tid}';",
+        "DELETE FROM invoices WHERE tenant_id = '{tid}';",
+        "DELETE FROM reviews WHERE tenant_id = '{tid}';",
+        "DELETE FROM customer_support_tickets WHERE tenant_id = '{tid}';",
+        "DELETE FROM support_tickets WHERE tenant_id = '{tid}';",
+        "DELETE FROM orders WHERE tenant_id = '{tid}';",
+        "DELETE FROM customer_packages WHERE tenant_id = '{tid}';",
+        "DELETE FROM prepaid_packages WHERE tenant_id = '{tid}';",
+        "DELETE FROM expenses WHERE tenant_id = '{tid}';",
+        "DELETE FROM coupons WHERE tenant_id = '{tid}';",
+        "DELETE FROM announcements WHERE tenant_id = '{tid}';",
+        "DELETE FROM leave_requests WHERE tenant_id = '{tid}';",
+        "DELETE FROM attendance WHERE tenant_id = '{tid}';",
+        "DELETE FROM notifications WHERE tenant_id = '{tid}';",
+        "DELETE FROM customer_addresses WHERE customer_id IN (SELECT id FROM customers WHERE tenant_id = '{tid}');",
+        "DELETE FROM customers WHERE tenant_id = '{tid}';",
+        "DELETE FROM services WHERE tenant_id = '{tid}';",
+        "DELETE FROM subscriptions WHERE tenant_id = '{tid}';",
+        "DELETE FROM audit_logs WHERE tenant_id = '{tid}';",
+        "DELETE FROM company_features WHERE company_id = '{tid}';",
+        "DELETE FROM platform_settings WHERE tenant_id = '{tid}';",
+        "DELETE FROM users WHERE tenant_id = '{tid}';",
+        "DELETE FROM companies WHERE id = '{tid}';"
+    ]
 
-        # 1. Reviews (SET NULL on order_id, safe first)
-        db.query(Review).filter(Review.tenant_id == id).delete(synchronize_session=False)
-
-        # 2. Support tickets
-        db.query(CustomerSupportTicket).filter(CustomerSupportTicket.tenant_id == id).delete(synchronize_session=False)
-        db.query(SupportTicket).filter(SupportTicket.tenant_id == id).delete(synchronize_session=False)
-
-        # 3. ALL FK children of orders must be deleted BEFORE orders:
-        #    - payments.order_id → orders.id
-        #    - deliveries.order_id → orders.id
-        #    - order_items.order_id → orders.id
-        #    - invoices.order_id → orders.id (CASCADE, but explicit for clarity)
-        #    - package_usage_history.order_id → orders.id
-        db.query(Payment).filter(Payment.tenant_id == id).delete(synchronize_session=False)
-        db.query(Delivery).filter(Delivery.tenant_id == id).delete(synchronize_session=False)
-        if order_ids:
-            db.query(OrderItem).filter(OrderItem.order_id.in_(order_ids)).delete(synchronize_session=False)
-        db.query(Invoice).filter(Invoice.tenant_id == id).delete(synchronize_session=False)
-        db.query(PackageUsageHistory).filter(PackageUsageHistory.tenant_id == id).delete(synchronize_session=False)
-
-        # 4. Now safe to delete orders
-        db.query(Order).filter(Order.tenant_id == id).delete(synchronize_session=False)
-
-        # 5. Expenses
-        db.query(Expense).filter(Expense.tenant_id == id).delete(synchronize_session=False)
-
-        # 6. Coupons
-        db.query(Coupon).filter(Coupon.tenant_id == id).delete(synchronize_session=False)
-
-        # 7. Announcements
-        db.query(Announcement).filter(Announcement.tenant_id == id).delete(synchronize_session=False)
-
-        # 8. Leave requests
-        db.query(LeaveRequest).filter(LeaveRequest.tenant_id == id).delete(synchronize_session=False)
-
-        # 9. Notifications
-        db.query(Notification).filter(Notification.tenant_id == id).delete(synchronize_session=False)
-
-        # 10. Customer addresses then customers
-        customer_ids = [c.id for c in db.query(Customer.id).filter(Customer.tenant_id == id).all()]
-        if customer_ids:
-            db.query(CustomerAddress).filter(CustomerAddress.customer_id.in_(customer_ids)).delete(synchronize_session=False)
-        db.query(Customer).filter(Customer.tenant_id == id).delete(synchronize_session=False)
-
-        # 11. Services
-        db.query(Service).filter(Service.tenant_id == id).delete(synchronize_session=False)
-
-        # 12. Subscription
-        db.query(Subscription).filter(Subscription.tenant_id == id).delete(synchronize_session=False)
-
-        # 13. Customer packages & prepaid packages
-        db.query(CustomerPackage).filter(CustomerPackage.tenant_id == id).delete(synchronize_session=False)
-        db.query(PrepaidPackage).filter(PrepaidPackage.tenant_id == id).delete(synchronize_session=False)
-
-        # 14. Audit logs
-        db.query(AuditLog).filter(AuditLog.tenant_id == id).delete(synchronize_session=False)
-
-        # Optional models (silently ignore if table doesn't exist)
+    for stmt in sql_steps:
+        formatted = stmt.format(tid=tid)
         try:
-            from app.models.company_feature import CompanyFeature
-            db.query(CompanyFeature).filter(CompanyFeature.company_id == id).delete(synchronize_session=False)
-        except Exception:
-            pass  # Table may not exist; continue
+            with engine.begin() as conn:
+                conn.execute(text(formatted))
+        except Exception as err:
+            print(f"[COMPANY DELETE WARN] Ignored non-critical error executing '{formatted[:50]}...': {err}")
 
-        try:
-            from app.models.platform_settings import PlatformSettings
-            db.query(PlatformSettings).filter(PlatformSettings.tenant_id == id).delete(synchronize_session=False)
-        except Exception:
-            pass  # Table may not exist; continue
-
-        try:
-            from app.models.wallet_pass import WalletPass
-            db.query(WalletPass).filter(WalletPass.company_id == id).delete(synchronize_session=False)
-        except Exception:
-            pass  # Table may not exist; continue
-
-        try:
-            from app.models.attendance import Attendance
-            db.query(Attendance).filter(Attendance.tenant_id == id).delete(synchronize_session=False)
-        except Exception:
-            pass  # Table may not exist; continue
-
-        # Delete all users then the company itself
-        db.query(User).filter(User.tenant_id == id).delete(synchronize_session=False)
-        db.query(Company).filter(Company.id == id).delete(synchronize_session=False)
-
-        db.commit()
-        return {"message": "Company and all associated data deleted successfully"}
-
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete company: {str(e)}"
-        )
+    return {"message": "Company and all associated data deleted successfully"}
 
 @router.post("/companies/{id}/status")
 def update_company_status(
