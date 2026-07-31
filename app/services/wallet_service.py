@@ -54,10 +54,12 @@ class WalletService:
 
             if cp:
                 wp = db.query(WalletPass).filter(WalletPass.customer_package_id == cp.id).first()
-                if not wp and cp.customer_id:
-                    wp = db.query(WalletPass).filter(WalletPass.customer_id == cp.customer_id).order_by(WalletPass.created_at.desc()).first()
                 if wp:
                     return wp
+                if cp.customer_id:
+                    wp = db.query(WalletPass).filter(WalletPass.customer_id == cp.customer_id).order_by(WalletPass.created_at.desc()).first()
+                    if wp:
+                        return wp
 
             # 1c. Check WalletPass.id (UUID) — Legacy URL handling
             try:
@@ -376,9 +378,11 @@ class WalletService:
             if getattr(settings, "GOOGLE_WALLET_ENABLED", True):
                 try:
                     from app.services.google_wallet.object_service import GoogleWalletObjectService
+                    gw_obj_id = wallet_pass.google_object_id if (wallet_pass and wallet_pass.google_object_id) else None
                     GoogleWalletObjectService.patch_generic_object(
                         package=package,
-                        customer=customer
+                        customer=customer,
+                        object_id=gw_obj_id
                     )
                     logger.info(f"[GoogleWallet] Successfully patched live object on usage for package {package.id}")
                 except Exception as e_gw_patch:
@@ -677,10 +681,14 @@ class WalletService:
             db.refresh(wallet_pass)
         else:
             wallet_pass.updated_at = datetime.datetime.utcnow()
-            wallet_pass.wallet_object_id = f"OBJ-{pkg_hex}"
-            wallet_pass.google_object_id = f"GOBJ-{pkg_hex}"
-            wallet_pass.class_id = f"CLASS-LAUNDRA-{tenant_hex}"
-            wallet_pass.google_class_id = f"GCLASS-LAUNDRA-{tenant_hex}"
+            if not wallet_pass.wallet_object_id:
+                wallet_pass.wallet_object_id = f"OBJ-{pkg_hex}"
+            if not wallet_pass.google_object_id:
+                wallet_pass.google_object_id = f"GOBJ-{pkg_hex}"
+            if not wallet_pass.class_id:
+                wallet_pass.class_id = f"CLASS-LAUNDRA-{tenant_hex}"
+            if not wallet_pass.google_class_id:
+                wallet_pass.google_class_id = f"GCLASS-LAUNDRA-{tenant_hex}"
 
             wallet_pass.wallet_url = pass_url
             wallet_pass.apple_pass_url = pass_url

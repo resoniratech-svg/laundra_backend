@@ -2,6 +2,7 @@ import logging
 import datetime
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
+from app.core.config import settings
 from app.models.customer_package import CustomerPackage
 from app.models.wallet_pass import WalletPass
 from app.models.user import User
@@ -42,11 +43,26 @@ class GoogleWalletPassService:
             if not company and package.tenant_id:
                 company = db.query(Company).filter(Company.id == package.tenant_id).first()
 
-            # 2. Create or fetch GenericObject
+            # Check if customer already has a WalletPass (reusable wallet card)
+            wallet_pass = WalletService.resolve_wallet_pass(
+                db=db,
+                customer_package_id=package.id,
+                customer_id=package.customer_id
+            )
+            # Only reuse google_object_id if it is a genuine Google Wallet ID
+            # (starts with the issuer ID prefix, not a local placeholder like GOBJ- or OBJ-)
+            reusable_object_id = None
+            if wallet_pass and wallet_pass.google_object_id:
+                issuer_id = getattr(settings, "GOOGLE_WALLET_ISSUER_ID", "") or ""
+                if issuer_id and wallet_pass.google_object_id.startswith(issuer_id):
+                    reusable_object_id = wallet_pass.google_object_id
+
+            # 2. Create or fetch/patch GenericObject
             object_res = GoogleWalletObjectService.get_or_create_generic_object(
                 package=package,
                 customer=customer,
-                company=company
+                company=company,
+                object_id=reusable_object_id
             )
             object_id = object_res["object_id"]
             object_payload = object_res["data"]
@@ -57,12 +73,6 @@ class GoogleWalletPassService:
 
             # 4. Persist clean backend URL to CustomerPackage & WalletPass in DB
             package.google_wallet_url = clean_redirect_url
-
-            wallet_pass = WalletService.resolve_wallet_pass(
-                db=db,
-                customer_package_id=package.id,
-                customer_id=package.customer_id
-            )
 
             now_dt = datetime.datetime.utcnow()
             if not wallet_pass:

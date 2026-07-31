@@ -84,40 +84,94 @@ class GoogleWalletObjectService:
     def resolve_background_color(cls, package: CustomerPackage) -> str:
         bal = float(package.current_balance or package.package_value or 0.0)
         val = float(package.package_value or 0.0)
+        used_qty = getattr(package, "used_quantity", 0) or 0
+        used_amt = float(getattr(package, "used_amount", 0.0) or 0.0)
         status = (package.status or "").upper()
 
-        if status in ["COMPLETED", "EXPIRED", "FULLY_UTILIZED", "CANCELLED"] or bal <= 0:
-            return "#64748B"  # Muted Grey (Expired/Exhausted)
-        elif val > 0 and bal < val:
-            return "#334155"  # Slate Grey (In Use)
-        return "#D97706"      # Premium Vibrant Gold/Amber (New/Active Gold Package)
+        now_dt = datetime.datetime.utcnow()
+        is_expired = False
+        if package.expiry_date and package.expiry_date.replace(tzinfo=None) < now_dt:
+            is_expired = True
+
+        services_used = False
+        all_services_exhausted = False
+        if getattr(package, "service_items", None) and isinstance(package.service_items, list) and len(package.service_items) > 0:
+            total_left = sum(item.get("left", 0) for item in package.service_items)
+            if total_left == 0:
+                all_services_exhausted = True
+            for item in package.service_items:
+                tot = item.get("total", 0)
+                left = item.get("left", tot)
+                if left < tot:
+                    services_used = True
+                    break
+
+        # Priority 1: COMPLETED / EXPIRED / ZERO BALANCE -> WHITE (#FFFFFF)
+        if is_expired or status in ["COMPLETED", "EXPIRED", "FULLY_UTILIZED", "CANCELLED"] or bal <= 0 or all_services_exhausted:
+            return "#FFFFFF"  # Pure White
+        
+        # Priority 2: IN USE -> GREY (#A6A6A6)
+        is_used = (val > 0 and bal < val) or used_qty > 0 or used_amt > 0 or services_used
+        if is_used:
+            return "#A6A6A6"  # Medium Neutral Grey (#A6A6A6)
+
+        # Priority 3: NEW / UNUSED -> GOLD (#D4AF37)
+        return "#D4AF37"      # Reference Gold (#D4AF37)
+
+    @classmethod
+    def resolve_qr_url(cls, package: CustomerPackage) -> str:
+        import os
+        token_str = package.secure_token if package.secure_token else str(package.id)
+        base_url = (
+            os.getenv("PUBLIC_BACKEND_URL") or 
+            os.getenv("BACKEND_BASE_URL") or 
+            getattr(settings, "PUBLIC_BACKEND_URL", None) or 
+            getattr(settings, "BACKEND_BASE_URL", None) or 
+            "https://dry-backend.cocjl5.easypanel.host"
+        )
+        base_url = str(base_url).strip().rstrip("/")
+        if base_url.endswith("/api/v1"):
+            base_url = base_url[:-7]
+            
+        return f"{base_url}/api/v1/wallet/google/pass/{token_str}"
 
     @classmethod
     def build_generic_object_payload(
         cls,
         package: CustomerPackage,
         customer: Optional[User] = None,
-        company: Optional[Company] = None
+        company: Optional[Company] = None,
+        object_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Constructs refined, production-grade GenericObject payload for Google Wallet.
         """
-        object_id = cls.get_object_id(package.id)
+        if not object_id:
+            object_id = cls.get_object_id(package.id)
         class_id = GoogleWalletClassService.get_class_id()
 
         company_name = cls.resolve_company_name(company)
         package_name = cls.resolve_package_name(package)
         customer_name = cls.resolve_customer_name(customer)
         balance_val = float(package.current_balance or package.package_value or 0.0)
-        expiry_formatted = cls.format_expiry_date(package.expiry_date)
-        services_formatted = cls.format_services_summary(package)
         card_bg_hex = cls.resolve_background_color(package)
 
         pass_state = "ACTIVE"
-        if package.status in ["COMPLETED", "EXPIRED", "FULLY_UTILIZED", "CANCELLED"]:
+        now_dt = datetime.datetime.utcnow()
+        is_expired = False
+        if package.expiry_date and package.expiry_date.replace(tzinfo=None) < now_dt:
+            is_expired = True
+
+        if is_expired or package.status in ["COMPLETED", "EXPIRED", "FULLY_UTILIZED", "CANCELLED"] or balance_val <= 0:
             pass_state = "EXPIRED"
 
-        qr_value = package.secure_token if package.secure_token else str(package.id)
+        status_display = (package.status or "ACTIVE").upper()
+        if is_expired:
+            status_display = "EXPIRED"
+        elif balance_val <= 0:
+            status_display = "COMPLETED"
+
+        qr_url = cls.resolve_qr_url(package)
 
         text_modules = [
             {
@@ -126,21 +180,40 @@ class GoogleWalletObjectService:
                 "body": customer_name
             },
             {
-                "id": "balance",
-                "header": "REMAINING BALANCE",
+                "id": "package",
+                "header": "PACKAGE",
+                "body": package_name
+            },
+            {
+                "id": "coupon_cost",
+                "header": "COUPON COST",
                 "body": f"QR {balance_val:.2f}"
             },
             {
-                "id": "expiry",
-                "header": "VALID UNTIL",
-                "body": expiry_formatted
-            },
-            {
-                "id": "services",
-                "header": "REMAINING SERVICES",
-                "body": services_formatted
+                "id": "status",
+                "header": "STATUS",
+                "body": status_display
             }
         ]
+
+        # Process Service Items per reference design
+        services_list = getattr(package, "service_items", None)
+        if services_list and isinstance(services_list, list) and len(services_list) > 0:
+            for i, item in enumerate(services_list):
+                srv_name = (item.get("service") or f"Service {i+1}").upper()
+                tot = item.get("total", 0)
+                left = item.get("left", tot)
+                text_modules.append({
+                    "id": f"service_{i+1}",
+                    "header": f"{srv_name} LEFT",
+                    "body": f"{left} / {tot}"
+                })
+        else:
+            text_modules.append({
+                "id": "service_1",
+                "header": "WASH & PRESS LEFT",
+                "body": "12 / 12"
+            })
 
         payload = {
             "id": object_id,
@@ -161,7 +234,8 @@ class GoogleWalletObjectService:
             "textModulesData": text_modules,
             "barcode": {
                 "type": "QR_CODE",
-                "value": qr_value
+                "value": qr_url,
+                "alternateText": "Scan to add pass"
             },
             "hexBackgroundColor": card_bg_hex
         }
@@ -174,18 +248,20 @@ class GoogleWalletObjectService:
         package: CustomerPackage,
         customer: Optional[User] = None,
         company: Optional[Company] = None,
+        object_id: Optional[str] = None,
         client: Optional[Any] = None
     ) -> Dict[str, Any]:
         """
         Patches/updates an existing GenericObject in Google Wallet REST API.
-        Used for design refreshes and pass synchronization.
+        Used for design refreshes, pass synchronization, and package renewals.
         """
-        object_id = cls.get_object_id(package.id)
+        if not object_id:
+            object_id = cls.get_object_id(package.id)
         if not client:
             client = get_google_wallet_client()
 
         logger.info(f"[GoogleWallet] START Patch Object | object_id={object_id}")
-        payload = cls.build_generic_object_payload(package, customer, company)
+        payload = cls.build_generic_object_payload(package, customer, company, object_id=object_id)
 
         try:
             patched_obj = client.genericobject().patch(resourceId=object_id, body=payload).execute()
@@ -208,9 +284,11 @@ class GoogleWalletObjectService:
         package: CustomerPackage,
         customer: Optional[User] = None,
         company: Optional[Company] = None,
+        object_id: Optional[str] = None,
         client: Optional[Any] = None
     ) -> Dict[str, Any]:
-        object_id = cls.get_object_id(package.id)
+        if not object_id:
+            object_id = cls.get_object_id(package.id)
         if not client:
             client = get_google_wallet_client()
 
@@ -218,12 +296,8 @@ class GoogleWalletObjectService:
 
         try:
             existing_obj = client.genericobject().get(resourceId=object_id).execute()
-            logger.info(f"[GoogleWallet] SUCCESS Object Found | object_id={object_id}")
-            return {
-                "status": "EXISTS",
-                "object_id": object_id,
-                "data": existing_obj
-            }
+            logger.info(f"[GoogleWallet] SUCCESS Object Found. Patching for Renewal/Sync | object_id={object_id}")
+            return cls.patch_generic_object(package, customer, company, object_id=object_id, client=client)
         except HttpError as err:
             if err.resp.status in [404, 400]:
                 logger.info(f"[GoogleWallet] Object NOT FOUND ({err.resp.status}). Proceeding to create | object_id={object_id}")
@@ -235,7 +309,7 @@ class GoogleWalletObjectService:
             raise
 
         logger.info(f"[GoogleWallet] START Object Creation | object_id={object_id}")
-        payload = cls.build_generic_object_payload(package, customer, company)
+        payload = cls.build_generic_object_payload(package, customer, company, object_id=object_id)
 
         try:
             created_obj = client.genericobject().insert(body=payload).execute()
@@ -248,7 +322,7 @@ class GoogleWalletObjectService:
         except HttpError as err:
             if err.resp.status == 409:
                 logger.info(f"[GoogleWallet] Object 409 Conflict (Already Exists). Patching | object_id={object_id}")
-                return cls.patch_generic_object(package, customer, company, client)
+                return cls.patch_generic_object(package, customer, company, object_id=object_id, client=client)
             logger.error(f"[GoogleWallet] FAILURE Object Creation | object_id={object_id} | status={err.resp.status} | reason={err}")
             raise
         except Exception as e:

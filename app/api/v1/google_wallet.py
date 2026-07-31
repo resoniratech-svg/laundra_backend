@@ -17,7 +17,7 @@ router = APIRouter(
     tags=["Google Wallet"],
 )
 
-@router.get("/pass/{token_or_id}")
+@router.get("/pass/{token_or_id:path}")
 def get_google_wallet_pass_redirect(
     token_or_id: str,
     db: Session = Depends(get_db)
@@ -32,18 +32,33 @@ def get_google_wallet_pass_redirect(
     clean_token = token_or_id.replace("customer/", "").strip()
     pkg = None
 
-    # 1. Try matching UUID package ID
-    try:
-        val_uuid = UUID(clean_token)
-        pkg = db.query(CustomerPackage).filter(CustomerPackage.id == val_uuid).first()
-    except Exception:
-        pass
+    # 1. Try matching secure_token
+    pkg = db.query(CustomerPackage).filter(CustomerPackage.secure_token == clean_token).first()
 
-    # 2. Try matching secure_token
+    # 2. Try matching UUID package ID
     if not pkg:
-        pkg = db.query(CustomerPackage).filter(CustomerPackage.secure_token == clean_token).first()
+        try:
+            val_uuid = UUID(clean_token)
+            pkg = db.query(CustomerPackage).filter(CustomerPackage.id == val_uuid).first()
+        except Exception:
+            pass
 
-    # 3. Centralized WalletPass lookup fallback
+    # 3. Try matching Customer ID (UUID)
+    if not pkg:
+        try:
+            c_uuid = UUID(clean_token)
+            pkg = db.query(CustomerPackage).filter(
+                CustomerPackage.customer_id == c_uuid,
+                CustomerPackage.status.in_(["ACTIVE", "IN_USE"])
+            ).order_by(CustomerPackage.purchase_date.desc()).first()
+            if not pkg:
+                pkg = db.query(CustomerPackage).filter(
+                    CustomerPackage.customer_id == c_uuid
+                ).order_by(CustomerPackage.purchase_date.desc()).first()
+        except Exception:
+            pass
+
+    # 4. Centralized WalletPass lookup fallback
     if not pkg:
         from app.services.wallet_service import WalletService
         wp = WalletService.resolve_wallet_pass(db, identifier=clean_token)
