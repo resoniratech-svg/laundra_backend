@@ -693,7 +693,7 @@ def get_customer_packages(
                     db.commit()
                     continue
 
-            if not p.apple_wallet_url and target_user:
+            if (not p.apple_wallet_url or not p.google_wallet_url) and target_user:
                 try:
                     WalletService.create_and_save_wallet_pass(
                         db=db,
@@ -709,6 +709,9 @@ def get_customer_packages(
 
             if not p.apple_wallet_url and p.secure_token:
                 p.apple_wallet_url = f"/api/v1/wallet/apple/pass/{p.secure_token}"
+
+            if not p.google_wallet_url or p.google_wallet_url.startswith("https://pay.google.com"):
+                p.google_wallet_url = f"/api/v1/wallet/google/pass/{p.secure_token or p.id}"
 
     return pkgs
 

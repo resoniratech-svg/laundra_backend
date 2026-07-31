@@ -4,7 +4,7 @@ from app.wallet.client import get_wallet_client
 
 def main():
     client = get_wallet_client()
-    test_ids = ["BCR2DN6D7LW37GQM", "338800000023177180"]
+    test_ids = ["BCR2DN6D7LW37GQM", "3388000000023177180"]
     
     for issuer_id in test_ids:
         class_id = f"{issuer_id}.laundry_package"

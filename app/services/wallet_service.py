@@ -228,6 +228,22 @@ class WalletService:
 
 
 
+        # 2. Google Wallet Generation (Isolated runtime execution)
+        if getattr(settings, "GOOGLE_WALLET_ENABLED", True):
+            try:
+                from app.services.google_wallet.pass_service import GoogleWalletPassService
+                logger.info(f"Starting Google Wallet Generation for package {package.id}")
+                gw_res = GoogleWalletPassService.generate_google_wallet_pass(
+                    db=db,
+                    package=package,
+                    customer=customer
+                )
+                if gw_res and gw_res.get("success"):
+                    status["google_wallet"] = True
+                    logger.info(f"Google Wallet Generated Successfully for package {package.id}")
+            except Exception as e_gw:
+                logger.error(f"Error generating Google Wallet pass for package {package.id}: {e_gw}")
+
         # 3. Apple Wallet
         try:
             logger.info("Starting Apple Wallet Generation")
@@ -355,6 +371,18 @@ class WalletService:
                 package_obj=package,
                 ctx=ctx
             )
+
+            # Synchronous: Patch Google Wallet object on usage (updates balance, services, status & theme)
+            if getattr(settings, "GOOGLE_WALLET_ENABLED", True):
+                try:
+                    from app.services.google_wallet.object_service import GoogleWalletObjectService
+                    GoogleWalletObjectService.patch_generic_object(
+                        package=package,
+                        customer=customer
+                    )
+                    logger.info(f"[GoogleWallet] Successfully patched live object on usage for package {package.id}")
+                except Exception as e_gw_patch:
+                    logger.error(f"[GoogleWallet] Failed to patch object on usage for package {package.id}: {e_gw_patch}")
 
             # Mark sync status as PENDING before committing (APNs push is deferred)
             if wallet_pass:

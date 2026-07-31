@@ -3,6 +3,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 import uuid
 import datetime
+from typing import Optional
 
 from app.models.base import Base
 
@@ -28,7 +29,8 @@ class CustomerPackage(Base):
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE") # ACTIVE, IN_USE, COMPLETED, EXPIRED, CANCELLED
     secure_token: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
     
-    apple_wallet_url: Mapped[str] = mapped_column(Text, nullable=True)
+    apple_wallet_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    google_wallet_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     pass_color: Mapped[str] = mapped_column(String(20), default="GOLD") # GOLD, GREY, ORANGE, WHITE
 

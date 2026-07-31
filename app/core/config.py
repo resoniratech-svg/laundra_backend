@@ -26,6 +26,18 @@ class Settings(BaseSettings):
     APPLE_WALLET_APNS_EXPIRATION_SECONDS: int = 86400
     APPLE_WALLET_APNS_PRIORITY: str = "10"
 
+    # Google Wallet
+    GOOGLE_WALLET_ENABLED: bool = True
+    GOOGLE_WALLET_ISSUER_ID: Optional[str] = None
+    GOOGLE_WALLET_CLASS_SUFFIX: str = "laundra_prepaid_package"
+    GOOGLE_WALLET_SERVICE_ACCOUNT_FILE: Optional[str] = "secrets/google-wallet.json"
+
+    @property
+    def GOOGLE_WALLET_CLASS_ID(self) -> Optional[str]:
+        if self.GOOGLE_WALLET_ISSUER_ID and self.GOOGLE_WALLET_CLASS_SUFFIX:
+            return f"{self.GOOGLE_WALLET_ISSUER_ID}.{self.GOOGLE_WALLET_CLASS_SUFFIX}"
+        return None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=True,
