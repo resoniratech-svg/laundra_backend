@@ -231,20 +231,29 @@ class OrderService:
             db.add(order)
             db.flush()
 
-            # Create OrderItems for services actually deducted (quantity > 0)
+            # Create OrderItems for services/cloths actually deducted (quantity > 0)
             for ded in deductions_list:
                 qty = getattr(ded, "quantity", 0)
                 svc_name = getattr(ded, "service", "")
                 if qty <= 0 or not svc_name:
                     continue
 
-                # Lookup matching Service record in DB to get service_id
+                clean_svc_name = svc_name.strip()
+
+                # 1. Lookup matching Service record in DB by exact/ilike name first (Cloth/garment name)
                 service = db.query(Service).filter(
                     Service.tenant_id == tenant_id,
-                    Service.name.ilike(svc_name.strip())
+                    Service.name.ilike(clean_svc_name)
                 ).first()
 
-                # Fallback to any service in tenant if exact name not matched
+                # 2. If not matched by Service name, try matching by Service category
+                if not service:
+                    service = db.query(Service).filter(
+                        Service.tenant_id == tenant_id,
+                        Service.category.ilike(clean_svc_name)
+                    ).first()
+
+                # 3. Fallback to any service in tenant if still not matched
                 if not service:
                     service = db.query(Service).filter(Service.tenant_id == tenant_id).first()
 
@@ -262,6 +271,8 @@ class OrderService:
                         delivery_pending_quantity=0,
                         item_status="COMPLETED"
                     )
+                    # Dynamically set exact cloth name on item instance
+                    setattr(order_item, 'service_name', clean_svc_name if clean_svc_name else service.name)
                     db.add(order_item)
 
             db.commit()

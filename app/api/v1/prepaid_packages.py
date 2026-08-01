@@ -151,7 +151,7 @@ def resolve_service_items_from_package(db: Session, pkg: PrepaidPackage) -> list
                 val_uuid = uuid.UUID(str(svc_id))
                 svc = db.query(Service).filter(Service.id == val_uuid).first()
                 if svc:
-                    resolved_cat = (svc.category or svc.name or "Service").strip()
+                    resolved_cat = (svc.name or svc.category or "Service").strip()
             except Exception:
                 pass
 
