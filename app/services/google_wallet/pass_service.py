@@ -49,10 +49,9 @@ class GoogleWalletPassService:
                 customer_package_id=package.id,
                 customer_id=package.customer_id
             )
-            # Only reuse google_object_id if it is a genuine Google Wallet ID
-            # (starts with the issuer ID prefix, not a local placeholder like GOBJ- or OBJ-)
+            # Only reuse google_object_id if it belongs to the SAME tenant
             reusable_object_id = None
-            if wallet_pass and wallet_pass.google_object_id:
+            if wallet_pass and str(wallet_pass.tenant_id) == str(package.tenant_id) and wallet_pass.google_object_id:
                 issuer_id = getattr(settings, "GOOGLE_WALLET_ISSUER_ID", "") or ""
                 if issuer_id and wallet_pass.google_object_id.startswith(issuer_id):
                     reusable_object_id = wallet_pass.google_object_id

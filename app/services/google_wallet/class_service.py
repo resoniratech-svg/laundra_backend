@@ -24,78 +24,83 @@ class GoogleWalletClassService:
     def build_generic_class_payload(cls, class_id: str) -> Dict[str, Any]:
         """
         Builds production-grade GenericClass template for Laundra Prepaid Packages.
-        Matches exact reference design:
+        Matches exact reference design with dynamic multi-service support:
         Row 1: CUSTOMER
         Row 2: PACKAGE + COUPON COST
         Row 3: STATUS + SERVICE 1 LEFT
-        Row 4: SERVICE 2 LEFT
+        Row 4..12: SERVICE 2..10 LEFT
         """
+        row_templates = [
+            {
+                "oneItem": {
+                    "item": {
+                        "firstValue": {
+                            "fields": [
+                                {"fieldPath": "object.textModulesData['customer']"}
+                            ]
+                        }
+                    }
+                }
+            },
+            {
+                "twoItems": {
+                    "startItem": {
+                        "firstValue": {
+                            "fields": [
+                                {"fieldPath": "object.textModulesData['package']"}
+                            ]
+                        }
+                    },
+                    "endItem": {
+                        "firstValue": {
+                            "fields": [
+                                {"fieldPath": "object.textModulesData['coupon_cost']"}
+                            ]
+                        }
+                    }
+                }
+            },
+            {
+                "twoItems": {
+                    "startItem": {
+                        "firstValue": {
+                            "fields": [
+                                {"fieldPath": "object.textModulesData['status']"}
+                            ]
+                        }
+                    },
+                    "endItem": {
+                        "firstValue": {
+                            "fields": [
+                                {"fieldPath": "object.textModulesData['service_1']"}
+                            ]
+                        }
+                    }
+                }
+            }
+        ]
+
+        # Dynamically add template rows for service_2 through service_10
+        for i in range(2, 11):
+            row_templates.append({
+                "oneItem": {
+                    "item": {
+                        "firstValue": {
+                            "fields": [
+                                {"fieldPath": f"object.textModulesData['service_{i}']"}
+                            ]
+                        }
+                    }
+                }
+            })
+
         return {
             "id": class_id,
             "issuerName": "Dry Cleaners",
             "reviewStatus": "underReview",
             "classTemplateInfo": {
                 "cardTemplateOverride": {
-                    "cardRowTemplateInfos": [
-                        {
-                            "oneItem": {
-                                "item": {
-                                    "firstValue": {
-                                        "fields": [
-                                            {"fieldPath": "object.textModulesData['customer']"}
-                                        ]
-                                    }
-                                }
-                            }
-                        },
-                        {
-                            "twoItems": {
-                                "startItem": {
-                                    "firstValue": {
-                                        "fields": [
-                                            {"fieldPath": "object.textModulesData['package']"}
-                                        ]
-                                    }
-                                },
-                                "endItem": {
-                                    "firstValue": {
-                                        "fields": [
-                                            {"fieldPath": "object.textModulesData['coupon_cost']"}
-                                        ]
-                                    }
-                                }
-                            }
-                        },
-                        {
-                            "twoItems": {
-                                "startItem": {
-                                    "firstValue": {
-                                        "fields": [
-                                            {"fieldPath": "object.textModulesData['status']"}
-                                        ]
-                                    }
-                                },
-                                "endItem": {
-                                    "firstValue": {
-                                        "fields": [
-                                            {"fieldPath": "object.textModulesData['service_1']"}
-                                        ]
-                                    }
-                                }
-                            }
-                        },
-                        {
-                            "oneItem": {
-                                "item": {
-                                    "firstValue": {
-                                        "fields": [
-                                            {"fieldPath": "object.textModulesData['service_2']"}
-                                        ]
-                                    }
-                                }
-                            }
-                        }
-                    ]
+                    "cardRowTemplateInfos": row_templates
                 }
             }
         }
@@ -105,7 +110,7 @@ class GoogleWalletClassService:
         """
         Idempotently checks if GenericClass exists.
         If missing (404), creates it.
-        If missing template layout, patches it.
+        Patches existing class layout to support dynamic multi-service rows.
         """
         class_id = cls.get_class_id()
         if not client:
@@ -117,6 +122,14 @@ class GoogleWalletClassService:
         try:
             existing_class = client.genericclass().get(resourceId=class_id).execute()
             logger.info(f"[GoogleWallet] SUCCESS Class Found | class_id={class_id}")
+
+            # Patch live class layout to ensure service_1 through service_10 template rows are registered
+            try:
+                payload = cls.build_generic_class_payload(class_id)
+                existing_class = client.genericclass().patch(resourceId=class_id, body=payload).execute()
+                logger.info(f"[GoogleWallet] SUCCESS Patched Class Layout for All Services | class_id={class_id}")
+            except Exception as e_patch:
+                logger.warning(f"[GoogleWallet] Warning patching class layout: {e_patch}")
 
             return {
                 "status": "EXISTS",

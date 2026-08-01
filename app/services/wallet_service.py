@@ -24,7 +24,8 @@ class WalletService:
         serial_number: Optional[str] = None,
         customer_id: Optional[Union[str, uuid.UUID]] = None,
         customer_package_id: Optional[Union[str, uuid.UUID]] = None,
-        identifier: Optional[Union[str, uuid.UUID]] = None
+        identifier: Optional[Union[str, uuid.UUID]] = None,
+        tenant_id: Optional[Union[str, uuid.UUID]] = None
     ) -> Optional[WalletPass]:
         """
         Single, centralized source of truth for all WalletPass lookups.
@@ -36,8 +37,8 @@ class WalletService:
            c) WalletPass.id == identifier (Logs legacy link usage)
            d) WalletPass.serial_number / apple_serial_number / authentication_token == identifier
         2. serial_number (Apple PassKit routes)
-        3. customer_id (Permanent Wallet identity)
-        4. customer_package_id (Fallback only)
+        3. customer_package_id (Exact package link)
+        4. customer_id + tenant_id (Permanent Wallet identity WITHIN THE SAME TENANT)
         """
         if identifier:
             ident_str = str(identifier).strip()
@@ -57,7 +58,11 @@ class WalletService:
                 if wp:
                     return wp
                 if cp.customer_id:
-                    wp = db.query(WalletPass).filter(WalletPass.customer_id == cp.customer_id).order_by(WalletPass.created_at.desc()).first()
+                    # Enforce strict TENANT ISOLATION: Only reuse WalletPass belonging to the SAME tenant!
+                    wp = db.query(WalletPass).filter(
+                        WalletPass.customer_id == cp.customer_id,
+                        WalletPass.tenant_id == cp.tenant_id
+                    ).order_by(WalletPass.created_at.desc()).first()
                     if wp:
                         return wp
 
@@ -106,12 +111,11 @@ class WalletService:
 
         if customer_id:
             c_uuid = uuid.UUID(str(customer_id)) if isinstance(customer_id, str) else customer_id
-            wallet_pass = (
-                db.query(WalletPass)
-                .filter(WalletPass.customer_id == c_uuid)
-                .order_by(WalletPass.created_at.desc())
-                .first()
-            )
+            query = db.query(WalletPass).filter(WalletPass.customer_id == c_uuid)
+            if tenant_id:
+                t_uuid = uuid.UUID(str(tenant_id)) if isinstance(tenant_id, str) else tenant_id
+                query = query.filter(WalletPass.tenant_id == t_uuid)
+            wallet_pass = query.order_by(WalletPass.created_at.desc()).first()
             if wallet_pass:
                 return wallet_pass
 

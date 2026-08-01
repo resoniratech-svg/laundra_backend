@@ -27,11 +27,32 @@ class GoogleWalletObjectService:
         return f"{issuer_id}.pkg_{clean_uuid}"
 
     @classmethod
-    def resolve_company_name(cls, company: Optional[Company] = None) -> str:
-        raw_name = (company.name if company and company.name else "").strip()
-        if not raw_name or raw_name.lower() in ["iron", "wash", "dry", "steam", "service", "test"]:
-            return "Laundra Laundry"
-        return raw_name
+    def resolve_company_name(cls, company: Optional[Company] = None, package: Optional[CustomerPackage] = None) -> str:
+        """
+        Dynamically resolves the issuing SaaS tenant company name.
+        Ensures the company name is strictly pinned to package.tenant_id
+        and is NEVER hardcoded or replaced by another tenant.
+        """
+        if company and company.name and company.name.strip():
+            return company.name.strip()
+
+        if package and getattr(package, "company", None) and package.company and package.company.name and package.company.name.strip():
+            return package.company.name.strip()
+
+        if package and getattr(package, "tenant_id", None):
+            try:
+                from app.core.database import SessionLocal
+                db = SessionLocal()
+                try:
+                    c = db.query(Company).filter(Company.id == package.tenant_id).first()
+                    if c and c.name and c.name.strip():
+                        return c.name.strip()
+                finally:
+                    db.close()
+            except Exception:
+                pass
+
+        return "Laundry SaaS"
 
     @classmethod
     def resolve_package_name(cls, package: CustomerPackage) -> str:
@@ -150,7 +171,7 @@ class GoogleWalletObjectService:
             object_id = cls.get_object_id(package.id)
         class_id = GoogleWalletClassService.get_class_id()
 
-        company_name = cls.resolve_company_name(company)
+        company_name = cls.resolve_company_name(company, package)
         package_name = cls.resolve_package_name(package)
         customer_name = cls.resolve_customer_name(customer)
         balance_val = float(package.current_balance or package.package_value or 0.0)
@@ -209,11 +230,32 @@ class GoogleWalletObjectService:
                     "body": f"{left} / {tot}"
                 })
         else:
-            text_modules.append({
-                "id": "service_1",
-                "header": "WASH & PRESS LEFT",
-                "body": "12 / 12"
-            })
+            legacy_services = []
+            if getattr(package, "wash_total", 0):
+                legacy_services.append({"service": "WASH & PRESS", "total": package.wash_total, "left": package.wash_left})
+            if getattr(package, "iron_total", 0):
+                legacy_services.append({"service": "PRESSING", "total": package.iron_total, "left": package.iron_left})
+            if getattr(package, "dry_total", 0):
+                legacy_services.append({"service": "DRY CLEANING", "total": package.dry_total, "left": package.dry_left})
+            if getattr(package, "steam_total", 0):
+                legacy_services.append({"service": "STEAM", "total": package.steam_total, "left": package.steam_left})
+            
+            if legacy_services:
+                for i, item in enumerate(legacy_services):
+                    srv_name = item["service"].upper()
+                    tot = item["total"]
+                    left = item["left"]
+                    text_modules.append({
+                        "id": f"service_{i+1}",
+                        "header": f"{srv_name} LEFT",
+                        "body": f"{left} / {tot}"
+                    })
+            else:
+                text_modules.append({
+                    "id": "service_1",
+                    "header": "WASH & PRESS LEFT",
+                    "body": "12 / 12"
+                })
 
         payload = {
             "id": object_id,
@@ -228,7 +270,7 @@ class GoogleWalletObjectService:
             "header": {
                 "defaultValue": {
                     "language": "en-US",
-                    "value": package_name
+                    "value": company_name
                 }
             },
             "textModulesData": text_modules,
