@@ -194,6 +194,13 @@ class GoogleWalletObjectService:
 
         qr_url = cls.resolve_qr_url(package)
 
+        # Calculate actual OFFER PRICE paid by customer for COUPON COST
+        cost_val = balance_val
+        if hasattr(package, 'package') and package.package and getattr(package.package, 'offer_price', None) is not None:
+            cost_val = float(package.package.offer_price)
+        elif getattr(package, 'package_value', None) is not None:
+            cost_val = float(package.package_value)
+
         text_modules = [
             {
                 "id": "customer",
@@ -208,7 +215,7 @@ class GoogleWalletObjectService:
             {
                 "id": "coupon_cost",
                 "header": "COUPON COST",
-                "body": f"QR {balance_val:.2f}"
+                "body": f"QR {cost_val:.2f}"
             },
             {
                 "id": "status",

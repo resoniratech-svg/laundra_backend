@@ -80,14 +80,23 @@ class GoogleWalletClassService:
             }
         ]
 
-        # Dynamically add template rows for service_2 through service_10
-        for i in range(2, 11):
+        # Dynamically add 2-per-row twoItems template rows for service_2 through service_11
+        for i in range(2, 12, 2):
+            s_start = f"service_{i}"
+            s_end = f"service_{i+1}"
             row_templates.append({
-                "oneItem": {
-                    "item": {
+                "twoItems": {
+                    "startItem": {
                         "firstValue": {
                             "fields": [
-                                {"fieldPath": f"object.textModulesData['service_{i}']"}
+                                {"fieldPath": f"object.textModulesData['{s_start}']"}
+                            ]
+                        }
+                    },
+                    "endItem": {
+                        "firstValue": {
+                            "fields": [
+                                {"fieldPath": f"object.textModulesData['{s_end}']"}
                             ]
                         }
                     }
