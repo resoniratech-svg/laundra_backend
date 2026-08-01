@@ -182,8 +182,10 @@ class PassService:
                 return label_map[n]
             return n.upper().replace(" LEFT", "").replace(" SERVICES", "")[:12]
 
-        # Build auxiliaryFields DYNAMICALLY from service_items
+        # Build auxiliaryFields DYNAMICALLY from service_items (front face max 4 rendered by PassKit)
         aux_fields = []
+        back_fields = []
+
         if svc_items and len(svc_items) > 0:
             for si in svc_items:
                 svc_name = si.get("service", "Service")
@@ -195,6 +197,11 @@ class PassService:
                     aux_fields.append({
                         "key": key,
                         "label": label,
+                        "value": f"{left} / {total}"
+                    })
+                    back_fields.append({
+                        "key": f"back_{key}",
+                        "label": f"{svc_name.upper()} LEFT",
                         "value": f"{left} / {total}"
                     })
         else:
@@ -209,12 +216,16 @@ class PassService:
             steam_t = getattr(data, "steam_total", 0) or 0
             if wash_t > 0:
                 aux_fields.append({"key": "wash_left", "label": "WASH & PRESS", "value": f"{wash_l} / {wash_t}"})
+                back_fields.append({"key": "back_wash_left", "label": "WASH & PRESS LEFT", "value": f"{wash_l} / {wash_t}"})
             if dry_t > 0:
                 aux_fields.append({"key": "dry_left", "label": "DRY CLEAN", "value": f"{dry_l} / {dry_t}"})
+                back_fields.append({"key": "back_dry_left", "label": "DRY CLEANING LEFT", "value": f"{dry_l} / {dry_t}"})
             if iron_t > 0:
                 aux_fields.append({"key": "iron_left", "label": "PRESSING", "value": f"{iron_l} / {iron_t}"})
+                back_fields.append({"key": "back_iron_left", "label": "PRESSING LEFT", "value": f"{iron_l} / {iron_t}"})
             if steam_t > 0:
                 aux_fields.append({"key": "steam_left", "label": "STEAM PRESS", "value": f"{steam_l} / {steam_t}"})
+                back_fields.append({"key": "back_steam_left", "label": "STEAM PRESS LEFT", "value": f"{steam_l} / {steam_t}"})
 
         # If no aux_fields were produced, add a default balance field (matches main behavior)
         if not aux_fields:
@@ -223,6 +234,20 @@ class PassService:
                 "label": "Balance",
                 "value": data.remaining_balance
             })
+
+        # Append existing pass metadata to backFields
+        back_fields.extend([
+            {
+                "key": "expiry_date",
+                "label": "EXPIRY DATE",
+                "value": context["expiry_date"]
+            },
+            {
+                "key": "member_since",
+                "label": "MEMBER SINCE",
+                "value": context["member_since"]
+            }
+        ])
 
         sec_fields = [
             {
@@ -265,18 +290,7 @@ class PassService:
             ],
             "secondaryFields": sec_fields,
             "auxiliaryFields": aux_fields,
-            "backFields": [
-                {
-                    "key": "expiry_date",
-                    "label": "EXPIRY DATE",
-                    "value": context["expiry_date"]
-                },
-                {
-                    "key": "member_since",
-                    "label": "MEMBER SINCE",
-                    "value": context["member_since"]
-                }
-            ]
+            "backFields": back_fields
         }
 
         # ALWAYS build barcode programmatically (main does this, staging removed it)
