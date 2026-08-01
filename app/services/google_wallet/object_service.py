@@ -270,7 +270,7 @@ class GoogleWalletObjectService:
             "header": {
                 "defaultValue": {
                     "language": "en-US",
-                    "value": company_name
+                    "value": customer_name
                 }
             },
             "textModulesData": text_modules,
