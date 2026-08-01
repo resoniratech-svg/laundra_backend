@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from uuid import UUID, uuid4
 from datetime import datetime, date
 from decimal import Decimal
+from typing import Optional
 import random
 import string
 from fastapi import HTTPException, status
@@ -170,9 +171,105 @@ class OrderService:
             db.add(order_item)
 
         # 6. Update loyalty points (+1 point per 100 spent)
-        points_earned = int(final_amount // Decimal("100.0"))
-        customer.loyalty_points += points_earned
-        
         db.commit()
         db.refresh(order)
         return order
+
+    @staticmethod
+    def create_package_deduction_order(
+        db: Session,
+        *,
+        customer_package: CustomerPackage,
+        tenant_id: UUID,
+        customer_id: UUID,
+        amount_deducted: float = 0.0,
+        deductions: list = None,
+        remarks: str = None
+    ) -> Optional[Order]:
+        """
+        Creates a completed Order History record for a prepaid package deduction.
+        This record appears in the Order History Archive module without disturbing wallet or package calculations.
+        """
+        try:
+            order_id = uuid4()
+            order_num = OrderService.generate_order_number()
+            now = datetime.utcnow()
+
+            deductions_list = deductions or []
+            order_total = Decimal(str(amount_deducted)) if amount_deducted and amount_deducted > 0 else Decimal("0.0")
+
+            # Format special instructions / remarks summary
+            summary_parts = []
+            for d in deductions_list:
+                qty = getattr(d, "quantity", 0)
+                svc = getattr(d, "service", "Service")
+                if qty > 0:
+                    summary_parts.append(f"{qty}x {svc}")
+            if amount_deducted and amount_deducted > 0:
+                summary_parts.append(f"QR {amount_deducted:.2f} Wallet")
+
+            ded_summary = ", ".join(summary_parts) if summary_parts else "Package Deduction"
+            order_remarks = remarks or f"Package Deduction ({ded_summary})"
+
+            # Create Order Header
+            order = Order(
+                id=order_id,
+                tenant_id=tenant_id,
+                customer_id=customer_id,
+                order_number=order_num,
+                status="Completed",
+                total_amount=order_total,
+                discount=Decimal("0.0"),
+                paid_amount=order_total,
+                payment_status="PAID",
+                applied_package_id=customer_package.id,
+                special_instructions=order_remarks,
+                pickup_date=now,
+                delivery_date=now,
+                qr_code=f"https://laundrysaas.com/orders/{order_id}/qr"
+            )
+            db.add(order)
+            db.flush()
+
+            # Create OrderItems for services actually deducted (quantity > 0)
+            for ded in deductions_list:
+                qty = getattr(ded, "quantity", 0)
+                svc_name = getattr(ded, "service", "")
+                if qty <= 0 or not svc_name:
+                    continue
+
+                # Lookup matching Service record in DB to get service_id
+                service = db.query(Service).filter(
+                    Service.tenant_id == tenant_id,
+                    Service.name.ilike(svc_name.strip())
+                ).first()
+
+                # Fallback to any service in tenant if exact name not matched
+                if not service:
+                    service = db.query(Service).filter(Service.tenant_id == tenant_id).first()
+
+                if service:
+                    order_item = OrderItem(
+                        id=uuid4(),
+                        order_id=order_id,
+                        service_id=service.id,
+                        quantity=qty,
+                        price=Decimal("0.0"),
+                        ordered_quantity=qty,
+                        picked_up_quantity=qty,
+                        pickup_pending_quantity=0,
+                        delivered_quantity=qty,
+                        delivery_pending_quantity=0,
+                        item_status="COMPLETED"
+                    )
+                    db.add(order_item)
+
+            db.commit()
+            db.refresh(order)
+            return order
+
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Error creating package deduction Order History: {e}")
+            db.rollback()
+            return None

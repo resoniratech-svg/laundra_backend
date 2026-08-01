@@ -22,6 +22,7 @@ from app.models.wallet_pass import WalletPass
 from app.models.payment import Payment
 from app.services.wallet_service import WalletService
 from app.services.whatsapp_service import WhatsAppService
+from app.services.order_service import OrderService
 
 router = APIRouter()
 
@@ -605,6 +606,21 @@ def deduct_package_usage(
     except Exception as e_hist:
         import logging
         logging.getLogger(__name__).error(f"Error logging PackageUsageHistory: {e_hist}")
+
+    # Record Order History for package deduction (non-blocking)
+    try:
+        OrderService.create_package_deduction_order(
+            db,
+            customer_package=cp,
+            tenant_id=current_user.tenant_id,
+            customer_id=cp.customer_id,
+            amount_deducted=a_used,
+            deductions=payload.deductions,
+            remarks=payload.remarks
+        )
+    except Exception as e_ord:
+        import logging
+        logging.getLogger(__name__).error(f"Error logging Order History for package deduction: {e_ord}")
 
     # Regenerate Pass & dispatch async APNs push
     customer = db.query(User).filter(User.id == cp.customer_id).first()

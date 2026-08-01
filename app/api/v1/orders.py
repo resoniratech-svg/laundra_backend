@@ -57,9 +57,14 @@ def list_orders(
     db: Session = Depends(get_db)
 ):
     from app.models.customer_package import CustomerPackage
+    from app.models.service import Service
     orders = order_repo.get_multi(db, tenant_id=current_admin.tenant_id)
     for o in orders:
         o.items = db.query(OrderItem).filter(OrderItem.order_id == o.id).all()
+        for item in o.items:
+            svc = db.query(Service).filter(Service.id == item.service_id).first()
+            if svc:
+                setattr(item, 'service_name', svc.name)
         if o.applied_package_id:
             cp = db.query(CustomerPackage).filter(CustomerPackage.id == o.applied_package_id).first()
             if cp and cp.package:
@@ -73,6 +78,7 @@ def get_order(
     db: Session = Depends(get_db)
 ):
     from app.models.customer_package import CustomerPackage
+    from app.models.service import Service
     order = order_repo.get(db, id, tenant_id=current_admin.tenant_id)
     if not order:
         raise HTTPException(
@@ -80,6 +86,10 @@ def get_order(
             detail="Order not found"
         )
     order.items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
+    for item in order.items:
+        svc = db.query(Service).filter(Service.id == item.service_id).first()
+        if svc:
+            setattr(item, 'service_name', svc.name)
     if order.applied_package_id:
         cp = db.query(CustomerPackage).filter(CustomerPackage.id == order.applied_package_id).first()
         if cp and cp.package:
