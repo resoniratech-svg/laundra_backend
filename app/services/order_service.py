@@ -30,7 +30,11 @@ class OrderService:
         coupon_code: str = None,
         tenant_id: UUID = None,
         is_express: bool = False,
-        pay_with_package_id: UUID = None
+        pay_with_package_id: UUID = None,
+        pickup_address: str = None,
+        delivery_address: str = None,
+        special_instructions: str = None,
+        pickup_date: datetime = None
     ) -> Order:
         if not tenant_id:
             tenant_id = get_current_tenant_id()
@@ -50,6 +54,10 @@ class OrderService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Customer not found"
             )
+
+        # Default addresses to customer address if not explicitly passed
+        final_pickup_address = pickup_address or getattr(customer, 'address', None) or 'Pickup at Branch'
+        final_delivery_address = delivery_address or getattr(customer, 'address', None) or 'Delivery at Branch'
 
         # 2. Process order items & calculate total amount
         total_amount = Decimal("0.0")
@@ -129,7 +137,11 @@ class OrderService:
             payment_status="UNPAID",
             qr_code=f"https://laundrysaas.com/orders/{order_id}/qr",
             is_express=is_express,
-            applied_package_id=pay_with_package_id
+            applied_package_id=pay_with_package_id,
+            pickup_address=final_pickup_address,
+            delivery_address=final_delivery_address,
+            special_instructions=special_instructions,
+            pickup_date=pickup_date or datetime.utcnow()
         )
         db.add(order)
         db.flush()

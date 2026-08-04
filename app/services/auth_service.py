@@ -106,7 +106,15 @@ class AuthService:
         return {
             "access_token": token,
             "token_type": "Bearer",
-            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "user": {
+                "id": str(user.id),
+                "name": user.name,
+                "email": user.email,
+                "role": user.role,
+                "tenant_id": str(user.tenant_id) if user.tenant_id else None,
+                "status": user.status
+            }
         }
 
     @staticmethod

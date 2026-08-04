@@ -43,7 +43,11 @@ def create_order(
         coupon_code=order_in.coupon_code,
         tenant_id=current_admin.tenant_id,
         is_express=order_in.is_express,
-        pay_with_package_id=order_in.pay_with_package_id
+        pay_with_package_id=order_in.pay_with_package_id,
+        pickup_address=order_in.pickup_address,
+        delivery_address=order_in.delivery_address,
+        special_instructions=order_in.special_instructions,
+        pickup_date=order_in.pickup_date
     )
     if order.applied_package_id:
         cp = db.query(CustomerPackage).filter(CustomerPackage.id == order.applied_package_id).first()
@@ -73,13 +77,23 @@ def list_orders(
 
 @router.get("/{id}", response_model=OrderOut)
 def get_order(
-    id: UUID,
+    id: str,
     current_admin: User = Depends(get_current_admin_or_cashier),
     db: Session = Depends(get_db)
 ):
     from app.models.customer_package import CustomerPackage
     from app.models.service import Service
-    order = order_repo.get(db, id, tenant_id=current_admin.tenant_id)
+    from sqlalchemy import or_
+    
+    order = None
+    try:
+        from uuid import UUID as PyUUID
+        val_uuid = PyUUID(id)
+        order = db.query(Order).filter(Order.id == val_uuid, Order.tenant_id == current_admin.tenant_id).first()
+    except Exception:
+        clean_num = str(id).replace('#', '').strip()
+        order = db.query(Order).filter(Order.order_number == clean_num, Order.tenant_id == current_admin.tenant_id).first()
+
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -266,14 +280,50 @@ def verify_order_otp(
         del MOCK_ORDER_OTP_STORE[store_key]
     
     # Update order status based on action
+    from app.models.delivery import Delivery
     if payload.action == "pickup":
         order.status = "RECEIVED"
         order.delivery_status = "Pending Delivery"
+        deliveries = db.query(Delivery).filter(Delivery.order_id == order.id, Delivery.type == "PICKUP").all()
+        for d in deliveries:
+            d.status = "PICKED"
     elif payload.action == "delivery":
-        order.status = "DELIVERED"
-        order.delivery_status = "Delivered"
-        order.payment_status = "PAID"
-        
+        all_items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
+        for item in all_items:
+            rdy = item.ready_quantity or 0
+            pck = item.picked_up_quantity if (item.picked_up_quantity is not None and item.picked_up_quantity > 0) else 0
+            del_qty = item.delivered_quantity or 0
+
+            max_deliverable = max(0, pck - del_qty)
+            del_batch = min(rdy, max_deliverable)
+            new_del = min(pck, del_qty + del_batch)
+
+            item.delivered_quantity = new_del
+            item.ready_quantity = 0
+            item.delivery_pending_quantity = max(0, pck - new_del)
+
+            if new_del >= pck and pck > 0:
+                item.item_status = "FULLY_DELIVERED"
+            else:
+                item.item_status = "PARTIALLY_DELIVERED"
+
+        all_fully_delivered = all(
+            (i.delivered_quantity or 0) >= (i.picked_up_quantity if (i.picked_up_quantity is not None and i.picked_up_quantity > 0) else (i.ordered_quantity or i.quantity or 1))
+            and (i.delivery_pending_quantity or 0) == 0
+            for i in all_items
+        )
+
+        if all_fully_delivered:
+            order.status = "DELIVERED"
+            order.delivery_status = "Delivered"
+            order.payment_status = "PAID"
+            deliveries = db.query(Delivery).filter(Delivery.order_id == order.id, Delivery.type == "DELIVERY").all()
+            for d in deliveries:
+                d.status = "DELIVERED"
+        else:
+            order.status = "PARTIALLY DELIVERED"
+            order.delivery_status = "Partially Delivered"
+
     db.commit()
     db.refresh(order)
     
@@ -386,12 +436,19 @@ class PartialActionPayload(BaseModel):
 
 @router.post("/{id}/pickup-items", response_model=OrderOut)
 def pickup_order_items(
-    id: UUID,
+    id: str,
     payload: PartialActionPayload,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    order = db.query(Order).filter(Order.id == id).first()
+    from sqlalchemy import or_
+    try:
+        from uuid import UUID as PyUUID
+        val_uuid = PyUUID(id)
+        order = db.query(Order).filter(or_(Order.id == val_uuid, Order.order_number == id)).first()
+    except ValueError:
+        order = db.query(Order).filter(Order.order_number == id).first()
+
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
@@ -405,10 +462,9 @@ def pickup_order_items(
         if action_item.quantity <= 0:
             continue
 
-        from sqlalchemy import or_
         item = db.query(OrderItem).filter(
             or_(OrderItem.id == action_item.item_id, OrderItem.service_id == action_item.item_id),
-            OrderItem.order_id == id
+            OrderItem.order_id == order.id
         ).first()
         if not item:
             raise HTTPException(status_code=404, detail=f"Order item {action_item.item_id} not found")
@@ -475,12 +531,19 @@ def pickup_order_items(
 
 @router.post("/{id}/deliver-items", response_model=OrderOut)
 def deliver_order_items(
-    id: UUID,
+    id: str,
     payload: PartialActionPayload,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    order = db.query(Order).filter(Order.id == id).first()
+    from sqlalchemy import or_
+    try:
+        from uuid import UUID as PyUUID
+        val_uuid = PyUUID(id)
+        order = db.query(Order).filter(or_(Order.id == val_uuid, Order.order_number == id)).first()
+    except ValueError:
+        order = db.query(Order).filter(Order.order_number == id).first()
+
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
@@ -494,10 +557,9 @@ def deliver_order_items(
         if action_item.quantity <= 0:
             continue
 
-        from sqlalchemy import or_
         item = db.query(OrderItem).filter(
             or_(OrderItem.id == action_item.item_id, OrderItem.service_id == action_item.item_id),
-            OrderItem.order_id == id
+            OrderItem.order_id == order.id
         ).first()
         if not item:
             raise HTTPException(status_code=404, detail=f"Order item {action_item.item_id} not found")
@@ -559,6 +621,52 @@ def deliver_order_items(
     elif all_fully_picked:
         order.status = "FULLY PICKED UP"
 
+    db.commit()
+    db.refresh(order)
+    order.items = all_items
+    return order
+
+
+@router.post("/{id}/ready-items", response_model=OrderOut)
+def update_ready_order_items(
+    id: str,
+    payload: PartialActionPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    from sqlalchemy import or_
+    try:
+        from uuid import UUID as PyUUID
+        val_uuid = PyUUID(id)
+        order = db.query(Order).filter(or_(Order.id == val_uuid, Order.order_number == id)).first()
+    except ValueError:
+        order = db.query(Order).filter(Order.order_number == id).first()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    for action_item in payload.items:
+        item = db.query(OrderItem).filter(
+            or_(OrderItem.id == action_item.item_id, OrderItem.service_id == action_item.item_id),
+            OrderItem.order_id == order.id
+        ).first()
+        if not item:
+            continue
+
+        pck = item.picked_up_quantity or 0
+        if action_item.quantity < 0:
+            raise HTTPException(status_code=400, detail="Ready quantity cannot be negative")
+        if action_item.quantity > pck:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ready quantity ({action_item.quantity}) cannot exceed Picked Up quantity ({pck})"
+            )
+
+        item.ready_quantity = action_item.quantity
+        del_qty = item.delivered_quantity or 0
+        item.delivery_pending_quantity = max(0, pck - del_qty)
+
+    all_items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
     db.commit()
     db.refresh(order)
     order.items = all_items

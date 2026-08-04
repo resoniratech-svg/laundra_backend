@@ -18,9 +18,11 @@ class OrderItemOut(OrderItemBase):
     ordered_quantity: Optional[int] = None
     picked_up_quantity: Optional[int] = 0
     pickup_pending_quantity: Optional[int] = None
+    ready_quantity: Optional[int] = 0
     delivered_quantity: Optional[int] = 0
     delivery_pending_quantity: Optional[int] = 0
     item_status: Optional[str] = "CREATED"
+    service_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -33,6 +35,10 @@ class OrderCreate(OrderBase):
     coupon_code: Optional[str] = None
     is_express: bool = False
     pay_with_package_id: Optional[UUID] = None
+    pickup_address: Optional[str] = None
+    delivery_address: Optional[str] = None
+    special_instructions: Optional[str] = None
+    pickup_date: Optional[datetime] = None
 
 class OrderOut(OrderBase):
     id: UUID

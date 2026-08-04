@@ -31,48 +31,66 @@ class DeliveryService:
                 detail="Tenant context not found"
             )
 
-        # 1. Verify Order
-        order = db.query(Order).filter(
-            Order.id == order_id,
-            Order.tenant_id == tenant_id
-        ).first()
+        # 1. Verify Order (by UUID or string order_number)
+        from sqlalchemy import or_
+        try:
+            from uuid import UUID as PyUUID
+            val_uuid = PyUUID(str(order_id))
+            order = db.query(Order).filter(
+                or_(Order.id == val_uuid, Order.order_number == str(order_id)),
+                Order.tenant_id == tenant_id
+            ).first()
+        except ValueError:
+            order = db.query(Order).filter(
+                Order.order_number == str(order_id),
+                Order.tenant_id == tenant_id
+            ).first()
+
         if not order:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Order not found"
             )
 
+        target_order_id = order.id
+
         # 2. Verify Delivery Boy if provided
         if delivery_boy_id:
             boy = db.query(User).filter(
                 User.id == delivery_boy_id,
-                User.tenant_id == tenant_id,
-                User.role == "DELIVERY_BOY"
+                User.tenant_id == tenant_id
             ).first()
-            if not boy:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Delivery boy not found or invalid role"
-                )
 
-        # 3. Create Delivery
-        delivery = Delivery(
-            id=uuid4(),
-            tenant_id=tenant_id,
-            order_id=order_id,
-            delivery_boy_id=delivery_boy_id,
-            type=delivery_type,
-            status="ASSIGNED",
-            otp=DeliveryService.generate_otp()
-        )
+        # 3. Check for existing active (non-delivered) Delivery record for this order and type
+        existing_delivery = db.query(Delivery).filter(
+            Delivery.order_id == target_order_id,
+            Delivery.type == delivery_type,
+            Delivery.tenant_id == tenant_id,
+            Delivery.status != "DELIVERED"
+        ).first()
+
+        if existing_delivery:
+            existing_delivery.delivery_boy_id = delivery_boy_id
+            existing_delivery.status = "ASSIGNED"
+            delivery = existing_delivery
+        else:
+            # Create a new delivery record (first time or previous batch was completed)
+            delivery = Delivery(
+                id=uuid4(),
+                tenant_id=tenant_id,
+                order_id=target_order_id,
+                delivery_boy_id=delivery_boy_id,
+                type=delivery_type,
+                status="ASSIGNED",
+                otp=DeliveryService.generate_otp()
+            )
+            db.add(delivery)
         
         # 4. Update Order Status
         if delivery_type == "PICKUP":
-            order.status = "ASSIGNED"  # or OUT_FOR_PICKUP
+            order.status = "ASSIGNED"
         else:
             order.status = "OUT_FOR_DELIVERY"
-
-        db.add(delivery)
         db.commit()
         db.refresh(delivery)
         return delivery

@@ -325,3 +325,31 @@ def reject_delivery_boy(
     db.refresh(user)
     return user
 
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: UUID,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    from sqlalchemy import text
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    uid = str(user_id)
+    try:
+        db.execute(text("DELETE FROM wallet_passes WHERE customer_id = :uid"), {"uid": uid})
+        db.execute(text("DELETE FROM customer_packages WHERE customer_id = :uid"), {"uid": uid})
+        db.execute(text("UPDATE deliveries SET delivery_boy_id = NULL WHERE delivery_boy_id = :uid"), {"uid": uid})
+        db.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": uid})
+        db.commit()
+    except Exception:
+        db.rollback()
+        db.delete(user)
+        db.commit()
+    return None
+
+

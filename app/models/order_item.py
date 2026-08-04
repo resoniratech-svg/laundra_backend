@@ -19,6 +19,7 @@ class OrderItem(BaseModel):
     pickup_pending_quantity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     delivered_quantity: Mapped[int] = mapped_column(Integer, default=0)
     delivery_pending_quantity: Mapped[int] = mapped_column(Integer, default=0)
+    ready_quantity: Mapped[int] = mapped_column(Integer, default=0)
     item_status: Mapped[Optional[str]] = mapped_column(String(30), default="CREATED")
 
     # Relationships

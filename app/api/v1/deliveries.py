@@ -373,7 +373,7 @@ class StatusUpdatePayload(BaseModel):
 
 @router.patch("/{id}/status", response_model=DeliveryOut)
 def update_delivery_boy_task_status(
-    id: UUID,
+    id: str,
     payload: StatusUpdatePayload,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -382,29 +382,75 @@ def update_delivery_boy_task_status(
     from app.models.order import Order
     from app.models.audit_log import AuditLog
     from app.models.notification import Notification
+    from sqlalchemy import or_
     from uuid import uuid4
     
     tenant_id = current_user.tenant_id
-    delivery = db.query(Delivery).filter(
-        Delivery.id == id,
-        Delivery.tenant_id == tenant_id
-    ).first()
+    delivery = None
+    try:
+        val_uuid = UUID(id)
+        delivery = db.query(Delivery).filter(
+            or_(Delivery.id == val_uuid, Delivery.order_id == val_uuid),
+            Delivery.tenant_id == tenant_id
+        ).first()
+    except Exception:
+        clean_num = str(id).replace('#', '').strip()
+        order_obj = db.query(Order).filter(Order.order_number == clean_num, Order.tenant_id == tenant_id).first()
+        if order_obj:
+            delivery = db.query(Delivery).filter(Delivery.order_id == order_obj.id, Delivery.tenant_id == tenant_id).first()
+
     if not delivery:
         raise HTTPException(status_code=404, detail="Delivery task not found")
          
-    if current_user.role == "DELIVERY_BOY" and delivery.delivery_boy_id != current_user.id:
+    if current_user.role == "DELIVERY_BOY" and delivery.delivery_boy_id and delivery.delivery_boy_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
          
-    allowed_statuses = ["ON_THE_WAY", "REACHED", "OUT_FOR_DELIVERY", "REACHED_CUSTOMER"]
+    allowed_statuses = ["ON_THE_WAY", "REACHED", "OUT_FOR_DELIVERY", "REACHED_CUSTOMER", "ACCEPTED", "ASSIGNED", "PICKED", "DELIVERED"]
     if payload.status not in allowed_statuses:
         raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of {allowed_statuses}")
          
+    if current_user.role == "DELIVERY_BOY" and not delivery.delivery_boy_id:
+        delivery.delivery_boy_id = current_user.id
+
     delivery.status = payload.status
     
     order = db.query(Order).filter(Order.id == delivery.order_id).first()
     if order:
         if payload.status == "OUT_FOR_DELIVERY":
             order.status = "OUT_FOR_DELIVERY"
+        elif payload.status == "DELIVERED":
+            all_items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
+            for item in all_items:
+                rdy = item.ready_quantity or 0
+                pck = item.picked_up_quantity if (item.picked_up_quantity is not None and item.picked_up_quantity > 0) else 0
+                del_qty = item.delivered_quantity or 0
+
+                max_deliverable = max(0, pck - del_qty)
+                del_batch = min(rdy, max_deliverable)
+                new_del = min(pck, del_qty + del_batch)
+
+                item.delivered_quantity = new_del
+                item.ready_quantity = 0
+                item.delivery_pending_quantity = max(0, pck - new_del)
+
+                if new_del >= pck and pck > 0:
+                    item.item_status = "FULLY_DELIVERED"
+                else:
+                    item.item_status = "PARTIALLY_DELIVERED"
+
+            all_fully_delivered = all(
+                (i.delivered_quantity or 0) >= (i.picked_up_quantity if (i.picked_up_quantity is not None and i.picked_up_quantity > 0) else (i.ordered_quantity or i.quantity or 1))
+                and (i.delivery_pending_quantity or 0) == 0
+                for i in all_items
+            )
+
+            if all_fully_delivered:
+                order.status = "DELIVERED"
+                order.delivery_status = "Delivered"
+                order.payment_status = "Paid"
+            else:
+                order.status = "PARTIALLY DELIVERED"
+                order.delivery_status = "Partially Delivered"
             
         title = f"laundry {payload.status.replace('_', ' ').title()}"
         msg = f"Your order {order.order_number} delivery status has been updated to: {payload.status.replace('_', ' ').lower()}"
@@ -498,7 +544,7 @@ def get_delivery_task_details(
     if not delivery:
         raise HTTPException(status_code=404, detail="Delivery task not found")
         
-    if current_user.role == "DELIVERY_BOY" and delivery.delivery_boy_id != current_user.id:
+    if current_user.role == "DELIVERY_BOY" and delivery.delivery_boy_id and delivery.delivery_boy_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
         
     order = db.query(Order).filter(Order.id == delivery.order_id).first()
@@ -510,12 +556,29 @@ def get_delivery_task_details(
         order_items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
         for oi in order_items:
             srv = db.query(Service).filter(Service.id == oi.service_id).first()
+            ord_qty = oi.ordered_quantity if oi.ordered_quantity is not None else (oi.quantity or 1)
+            picked_qty = oi.picked_up_quantity or 0
+            pending_pickup_qty = oi.pickup_pending_quantity if oi.pickup_pending_quantity is not None else max(0, ord_qty - picked_qty)
+            ready_qty = oi.ready_quantity or 0
+            del_qty = oi.delivered_quantity or 0
+            del_pending_qty = oi.delivery_pending_quantity if oi.delivery_pending_quantity is not None else max(0, ready_qty - del_qty)
+
+            u_price = float(oi.price) if oi.price is not None else 0.0
+            q_val = oi.quantity if oi.quantity is not None else ord_qty
+            tot_price = float(q_val * u_price)
+
             items.append({
                 "service_id": oi.service_id,
                 "service_name": srv.name if srv else "Unknown Service",
-                "quantity": oi.quantity,
-                "unit_price": float(oi.price),
-                "total_price": float(oi.quantity * oi.price)
+                "quantity": ord_qty,
+                "ordered_quantity": ord_qty,
+                "picked_up_quantity": picked_qty,
+                "pickup_pending_quantity": pending_pickup_qty,
+                "ready_quantity": ready_qty,
+                "delivered_quantity": del_qty,
+                "delivery_pending_quantity": del_pending_qty,
+                "unit_price": u_price,
+                "total_price": tot_price
             })
             
     return {
