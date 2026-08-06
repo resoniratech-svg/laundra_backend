@@ -58,6 +58,10 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             print(resp_log, flush=True)
             return response
 
+        user_agent = request.headers.get("user-agent", "N/A")
+        auth_present = "authorization" in request.headers
+        print(f"[FASTAPI INCOMING] IP={client_ip} | {request.method} {request.url} | UserAgent={user_agent} | Auth={'YES' if auth_present else 'NO'}", flush=True)
+
         response = await call_next(request)
         duration = (time.time() - start_time) * 1000
         

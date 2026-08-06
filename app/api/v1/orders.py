@@ -57,12 +57,17 @@ def create_order(
 
 @router.get("", response_model=List[OrderOut])
 def list_orders(
-    current_admin: User = Depends(get_current_admin_or_cashier),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    if current_user.role not in ["ADMIN", "CASHIER", "SUPER_ADMIN", "CUSTOMER", "DELIVERY_BOY"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The user does not have enough privileges."
+        )
     from app.models.customer_package import CustomerPackage
     from app.models.service import Service
-    orders = order_repo.get_multi(db, tenant_id=current_admin.tenant_id)
+    orders = order_repo.get_multi(db, tenant_id=current_user.tenant_id)
     for o in orders:
         o.items = db.query(OrderItem).filter(OrderItem.order_id == o.id).all()
         for item in o.items:
@@ -78,21 +83,25 @@ def list_orders(
 @router.get("/{id}", response_model=OrderOut)
 def get_order(
     id: str,
-    current_admin: User = Depends(get_current_admin_or_cashier),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    if current_user.role not in ["ADMIN", "CASHIER", "SUPER_ADMIN", "CUSTOMER", "DELIVERY_BOY"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The user does not have enough privileges."
+        )
     from app.models.customer_package import CustomerPackage
     from app.models.service import Service
-    from sqlalchemy import or_
     
     order = None
     try:
         from uuid import UUID as PyUUID
         val_uuid = PyUUID(id)
-        order = db.query(Order).filter(Order.id == val_uuid, Order.tenant_id == current_admin.tenant_id).first()
+        order = db.query(Order).filter(Order.id == val_uuid, Order.tenant_id == current_user.tenant_id).first()
     except Exception:
         clean_num = str(id).replace('#', '').strip()
-        order = db.query(Order).filter(Order.order_number == clean_num, Order.tenant_id == current_admin.tenant_id).first()
+        order = db.query(Order).filter(Order.order_number == clean_num, Order.tenant_id == current_user.tenant_id).first()
 
     if not order:
         raise HTTPException(
@@ -462,12 +471,25 @@ def pickup_order_items(
         if action_item.quantity <= 0:
             continue
 
-        item = db.query(OrderItem).filter(
-            or_(OrderItem.id == action_item.item_id, OrderItem.service_id == action_item.item_id),
-            OrderItem.order_id == order.id
-        ).first()
+        item = None
+        raw_id_str = str(action_item.item_id).strip()
+        try:
+            val_item_uuid = PyUUID(raw_id_str)
+            item = db.query(OrderItem).filter(
+                or_(OrderItem.id == val_item_uuid, OrderItem.id == raw_id_str),
+                OrderItem.order_id == order.id
+            ).first()
+        except Exception:
+            item = db.query(OrderItem).filter(
+                OrderItem.id == raw_id_str,
+                OrderItem.order_id == order.id
+            ).first()
+
         if not item:
-            raise HTTPException(status_code=404, detail=f"Order item {action_item.item_id} not found")
+            raise HTTPException(
+                status_code=404,
+                detail=f"OrderItem with ID '{action_item.item_id}' not found for order '{order.order_number}'"
+            )
 
         ordered_qty = item.ordered_quantity if item.ordered_quantity is not None else item.quantity
         curr_picked = item.picked_up_quantity or 0
@@ -515,7 +537,7 @@ def pickup_order_items(
         })
         order.pickup_history = json.dumps(history_list)
 
-    all_items = db.query(OrderItem).filter(OrderItem.order_id == id).all()
+    all_items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
     all_fully_picked = all((i.picked_up_quantity or 0) >= (i.ordered_quantity or i.quantity or 1) for i in all_items)
     any_picked = any((i.picked_up_quantity or 0) > 0 for i in all_items)
 
@@ -557,12 +579,25 @@ def deliver_order_items(
         if action_item.quantity <= 0:
             continue
 
-        item = db.query(OrderItem).filter(
-            or_(OrderItem.id == action_item.item_id, OrderItem.service_id == action_item.item_id),
-            OrderItem.order_id == order.id
-        ).first()
+        item = None
+        raw_id_str = str(action_item.item_id).strip()
+        try:
+            val_item_uuid = PyUUID(raw_id_str)
+            item = db.query(OrderItem).filter(
+                or_(OrderItem.id == val_item_uuid, OrderItem.id == raw_id_str),
+                OrderItem.order_id == order.id
+            ).first()
+        except Exception:
+            item = db.query(OrderItem).filter(
+                OrderItem.id == raw_id_str,
+                OrderItem.order_id == order.id
+            ).first()
+
         if not item:
-            raise HTTPException(status_code=404, detail=f"Order item {action_item.item_id} not found")
+            raise HTTPException(
+                status_code=404,
+                detail=f"OrderItem with ID '{action_item.item_id}' not found for order '{order.order_number}'"
+            )
 
         ordered_qty = item.ordered_quantity if item.ordered_quantity is not None else item.quantity
         curr_picked = item.picked_up_quantity if (item.picked_up_quantity is not None and item.picked_up_quantity > 0) else ordered_qty
@@ -609,7 +644,7 @@ def deliver_order_items(
         })
         order.delivery_history = json.dumps(history_list)
 
-    all_items = db.query(OrderItem).filter(OrderItem.order_id == id).all()
+    all_items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
     all_fully_delivered = all((i.delivered_quantity or 0) >= (i.ordered_quantity or i.quantity or 1) for i in all_items)
     any_delivered = any((i.delivered_quantity or 0) > 0 for i in all_items)
     all_fully_picked = all((i.picked_up_quantity or 0) >= (i.ordered_quantity or i.quantity or 1) for i in all_items)
@@ -646,12 +681,25 @@ def update_ready_order_items(
         raise HTTPException(status_code=404, detail="Order not found")
 
     for action_item in payload.items:
-        item = db.query(OrderItem).filter(
-            or_(OrderItem.id == action_item.item_id, OrderItem.service_id == action_item.item_id),
-            OrderItem.order_id == order.id
-        ).first()
+        item = None
+        raw_id_str = str(action_item.item_id).strip()
+        try:
+            val_item_uuid = PyUUID(raw_id_str)
+            item = db.query(OrderItem).filter(
+                or_(OrderItem.id == val_item_uuid, OrderItem.id == raw_id_str),
+                OrderItem.order_id == order.id
+            ).first()
+        except Exception:
+            item = db.query(OrderItem).filter(
+                OrderItem.id == raw_id_str,
+                OrderItem.order_id == order.id
+            ).first()
+
         if not item:
-            continue
+            raise HTTPException(
+                status_code=404,
+                detail=f"OrderItem with ID '{action_item.item_id}' not found for order '{order.order_number}'"
+            )
 
         pck = item.picked_up_quantity or 0
         if action_item.quantity < 0:

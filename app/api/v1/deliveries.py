@@ -9,6 +9,9 @@ from sqlalchemy import func
 from app.core.database import get_db
 from app.dependencies import get_current_user, get_current_admin, get_current_admin_or_cashier
 from app.models.user import User
+from app.models.delivery import Delivery
+from app.models.order import Order
+from app.models.order_item import OrderItem
 from app.schemas.delivery import DeliveryCreate, DeliveryOut
 from app.services.delivery_service import DeliveryService
 from app.repositories.delivery_repository import DeliveryRepository
@@ -261,17 +264,26 @@ def get_delivery_boy_dashboard(
         Delivery.created_at >= today_start
     ).scalar() or 0
     
-    # Pending
+    from sqlalchemy import or_
+    
+    # Pending Pickups
     pending_pickups = db.query(func.count(Delivery.id)).filter(
-        Delivery.delivery_boy_id == current_user.id,
+        or_(
+            Delivery.delivery_boy_id == current_user.id,
+            Delivery.delivery_boy_id == None
+        ),
         Delivery.tenant_id == tenant_id,
         Delivery.type == "PICKUP",
         Delivery.status != "PICKED",
         Delivery.status != "DELIVERED"
     ).scalar() or 0
     
+    # Pending Deliveries
     pending_deliveries = db.query(func.count(Delivery.id)).filter(
-        Delivery.delivery_boy_id == current_user.id,
+        or_(
+            Delivery.delivery_boy_id == current_user.id,
+            Delivery.delivery_boy_id == None
+        ),
         Delivery.tenant_id == tenant_id,
         Delivery.type == "DELIVERY",
         Delivery.status != "DELIVERED"
@@ -380,6 +392,7 @@ def update_delivery_boy_task_status(
 ):
     from app.models.delivery import Delivery
     from app.models.order import Order
+    from app.models.order_item import OrderItem
     from app.models.audit_log import AuditLog
     from app.models.notification import Notification
     from sqlalchemy import or_
@@ -568,7 +581,9 @@ def get_delivery_task_details(
             tot_price = float(q_val * u_price)
 
             items.append({
-                "service_id": oi.service_id,
+                "id": str(oi.id),
+                "order_item_id": str(oi.id),
+                "service_id": str(oi.service_id),
                 "service_name": srv.name if srv else "Unknown Service",
                 "quantity": ord_qty,
                 "ordered_quantity": ord_qty,

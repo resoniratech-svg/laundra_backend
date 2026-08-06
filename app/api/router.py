@@ -31,6 +31,7 @@ router.include_router(saas_admin.router, prefix="/saas-admin", tags=["SaaS Admin
 router.include_router(subscriptions.router, prefix="/subscriptions", tags=["Subscriptions"])
 router.include_router(support.router, prefix="/support", tags=["Support Tickets"])
 router.include_router(mobile_staff.router, prefix="/staff", tags=["Mobile Staff Operations"])
+router.include_router(mobile_staff.router, prefix="/mobile-staff", tags=["Mobile Staff Operations"])
 router.include_router(saas_plans.router, prefix="/saas/plans", tags=["SaaS Plans"])
 router.include_router(saas_monitoring.router, prefix="/saas/monitoring", tags=["SaaS Monitoring"])
 router.include_router(saas_reports.router, prefix="/saas/reports", tags=["SaaS Reports"])

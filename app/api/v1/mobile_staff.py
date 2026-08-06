@@ -130,6 +130,27 @@ def list_my_leaves(
         
     return db.query(LeaveRequest).filter(LeaveRequest.user_id == current_user.id).all()
 
+@router.get("/company-admin")
+def get_company_admin_contact(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    admin = db.query(User).filter(
+        User.tenant_id == current_user.tenant_id,
+        User.role == "ADMIN"
+    ).first()
+    if not admin:
+        admin = db.query(User).filter(User.role == "ADMIN").first()
+
+    phone_val = getattr(admin, 'phone', None) or "9638527411"
+    email_val = admin.email if (admin and admin.email) else "kanikarapub@gmail.com"
+
+    return {
+        "admin_name": admin.name if admin else "Company Admin",
+        "email": email_val,
+        "phone": phone_val
+    }
+
 @router.get("/earnings")
 def get_earnings(
     current_user: User = Depends(get_current_user),

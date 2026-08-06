@@ -171,6 +171,130 @@ def resolve_service_items_from_package(db: Session, pkg: PrepaidPackage) -> list
 
     return result
 
+import re
+import logging
+
+logger = logging.getLogger(__name__)
+
+STRICT_USAGE_RE = re.compile(r'^\s*(\d+)\s*x\s*(.+)\s*$', re.IGNORECASE)
+
+def parse_strict_remarks_for_service_usage(remarks: str, valid_services: list) -> dict:
+    """
+    Parses ONLY backend-generated remarks following the strict format:
+      <quantity>x <service name> (comma-separated if multiple items)
+    Example:
+      "3x Pressing, 2x Dry Cleaning, 5x Wash & Press"
+
+    If a segment does not conform to '<quantity>x <service name>', it is ignored
+    or logged as a malformed record. No arbitrary free-text guessing.
+    """
+    usage = {svc: 0 for svc in valid_services}
+    if not remarks or not isinstance(remarks, str):
+        return usage
+
+    svc_lookup = {s.strip().lower(): s for s in valid_services}
+    parts = [p.strip() for p in remarks.split(",") if p.strip()]
+
+    for part in parts:
+        if "wallet" in part.lower() or "qr" in part.lower():
+            continue
+
+        match = STRICT_USAGE_RE.match(part)
+        if not match:
+            logger.warning(f"[PackageUsageHistory] Ignoring malformed remark segment: '{part}' in remarks: '{remarks}'")
+            continue
+
+        try:
+            qty = int(match.group(1))
+            svc_raw = match.group(2).strip().lower()
+        except (ValueError, AttributeError):
+            logger.warning(f"[PackageUsageHistory] Failed to parse quantity/service from segment: '{part}'")
+            continue
+
+        matched_svc = svc_lookup.get(svc_raw)
+        if not matched_svc:
+            for valid_s, exact_name in svc_lookup.items():
+                if valid_s == svc_raw or valid_s in svc_raw or svc_raw in valid_s:
+                    matched_svc = exact_name
+                    break
+
+        if matched_svc:
+            usage[matched_svc] += qty
+        else:
+            logger.warning(f"[PackageUsageHistory] Service '{svc_raw}' from segment '{part}' not found in package eligible services: {valid_services}")
+
+    return usage
+
+def compute_remaining_package_from_history(db: Session, cp: CustomerPackage) -> CustomerPackage:
+    """
+    Calculates the customer's remaining package quantities using the original package definition (prepaid_packages)
+    and the actual package usage history (package_usage_history) as the single source of truth.
+    """
+    if not cp or not cp.package:
+        return cp
+
+    orig_items = resolve_service_items_from_package(db, cp.package)
+    if not orig_items:
+        return cp
+
+    service_names = [item["service"] for item in orig_items]
+
+    from app.models.package_usage_history import PackageUsageHistory
+    history_records = db.query(PackageUsageHistory).filter(
+        PackageUsageHistory.customer_package_id == cp.id
+    ).all()
+
+    accumulated_usage = {svc: 0 for svc in service_names}
+    for rec in history_records:
+        if rec.remarks:
+            rec_usage = parse_strict_remarks_for_service_usage(rec.remarks, service_names)
+            for svc, count in rec_usage.items():
+                accumulated_usage[svc] += count
+
+    updated_service_items = []
+    total_remaining_items = 0
+    for item in orig_items:
+        svc_name = item["service"]
+        orig_total = item["total"]
+        used_qty = accumulated_usage.get(svc_name, 0)
+        rem_qty = max(0, orig_total - used_qty)
+        total_remaining_items += rem_qty
+        updated_service_items.append({
+            "service": svc_name,
+            "total": orig_total,
+            "left": rem_qty
+        })
+
+    cp.service_items = updated_service_items
+
+    # Sync legacy fixed fields
+    w_left, i_left, d_left, s_left = 0, 0, 0, 0
+    for si in updated_service_items:
+        cat = si["service"].lower()
+        if "steam" in cat:
+            s_left += si["left"]
+        elif "wash" in cat or "fold" in cat:
+            w_left += si["left"]
+        elif "press" in cat or "iron" in cat:
+            i_left += si["left"]
+        elif "dry" in cat or "premium" in cat:
+            d_left += si["left"]
+        else:
+            w_left += si["left"]
+
+    cp.wash_left = w_left
+    cp.iron_left = i_left
+    cp.dry_left = d_left
+    cp.steam_left = s_left
+
+    if total_remaining_items <= 0:
+        cp.status = "COMPLETED"
+        cp.pass_color = "WHITE"
+    elif cp.status in ["COMPLETED", "ACTIVE"]:
+        cp.status = "IN_USE" if any(si["left"] < si["total"] for si in updated_service_items) else "ACTIVE"
+
+    return cp
+
 @router.post("/purchase", response_model=CustomerPackageResponse, status_code=201)
 def purchase_package(
     payload: CustomerPackageCreate,
@@ -397,11 +521,28 @@ def get_active_customer_package(
     if not real_customer_id:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    cp = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
-        CustomerPackage.customer_id == real_customer_id,
-        CustomerPackage.tenant_id == current_user.tenant_id,
-        CustomerPackage.status.in_(["ACTIVE", "IN_USE"])
-    ).order_by(CustomerPackage.purchase_date.desc()).first()
+    # Step 1: Identify customer's ACTIVE package using wallet_passes table first, then customer_packages
+    cp = None
+    from app.models.wallet_pass import WalletPass
+    wp = db.query(WalletPass).filter(
+        WalletPass.customer_id == real_customer_id,
+        WalletPass.tenant_id == current_user.tenant_id,
+        WalletPass.customer_package_id.isnot(None),
+        (WalletPass.wallet_status == 'ACTIVE') | (WalletPass.pass_status == 'ACTIVE')
+    ).order_by(WalletPass.created_at.desc()).first()
+
+    if wp and wp.customer_package_id:
+        cp = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
+            CustomerPackage.id == wp.customer_package_id,
+            CustomerPackage.tenant_id == current_user.tenant_id
+        ).first()
+
+    if not cp:
+        cp = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
+            CustomerPackage.customer_id == real_customer_id,
+            CustomerPackage.tenant_id == current_user.tenant_id,
+            CustomerPackage.status.in_(["ACTIVE", "IN_USE"])
+        ).order_by(CustomerPackage.purchase_date.desc()).first()
 
     if not cp:
         cp = db.query(CustomerPackage).options(joinedload(CustomerPackage.package)).filter(
@@ -412,15 +553,8 @@ def get_active_customer_package(
     if not cp:
         raise HTTPException(status_code=404, detail="No active package found for customer")
 
-    # Auto-fix missing service_items for existing packages
-    if cp and (not cp.service_items or len(cp.service_items) == 0):
-        resolved = resolve_service_items_from_package(db, cp.package)
-        if resolved:
-            from sqlalchemy.orm.attributes import flag_modified
-            cp.service_items = resolved
-            flag_modified(cp, "service_items")
-            db.commit()
-            db.refresh(cp)
+    # Steps 2-5: Compute remaining quantities from original prepaid_packages definition minus package_usage_history
+    cp = compute_remaining_package_from_history(db, cp)
 
     return cp
 
@@ -729,6 +863,9 @@ def get_customer_packages(
             if not p.google_wallet_url or p.google_wallet_url.startswith("https://pay.google.com"):
                 p.google_wallet_url = f"/api/v1/wallet/google/pass/{p.secure_token or p.id}"
 
+    for p in pkgs:
+        compute_remaining_package_from_history(db, p)
+
     return pkgs
 
 @router.get("/qr/{secure_token}")
@@ -744,6 +881,9 @@ def get_package_by_qr_token(
     
     if not pkg:
         raise HTTPException(status_code=404, detail="Invalid QR Code")
+    
+    pkg = compute_remaining_package_from_history(db, pkg)
+    return pkg
         
     usage_history = db.query(PackageUsageHistory).filter(
         PackageUsageHistory.customer_package_id == pkg.id
