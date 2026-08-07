@@ -235,6 +235,23 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 18 failed: {e}")
 
+# Isolated migration 19 – Commission columns for orders and deliveries tables
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_commission NUMERIC(10, 2) DEFAULT 0.0;"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_commission NUMERIC(10, 2) DEFAULT 0.0;"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_staff_id UUID;"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_staff_id UUID;"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_commission_paid BOOLEAN DEFAULT FALSE;"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_commission_paid BOOLEAN DEFAULT FALSE;"))
+
+        conn.execute(text("ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS pickup_commission NUMERIC(10, 2) DEFAULT 0.0;"))
+        conn.execute(text("ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS delivery_commission NUMERIC(10, 2) DEFAULT 0.0;"))
+        conn.execute(text("ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS pickup_commission_paid BOOLEAN DEFAULT FALSE;"))
+        conn.execute(text("ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS delivery_commission_paid BOOLEAN DEFAULT FALSE;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 19 failed: {e}")
+
 try:
     import alembic.config
     import alembic.command
