@@ -45,7 +45,9 @@ def assign_delivery(
         order_id=payload.order_id,
         delivery_boy_id=payload.delivery_boy_id,
         delivery_type=payload.type,
-        tenant_id=current_admin.tenant_id
+        tenant_id=current_admin.tenant_id,
+        pickup_commission=payload.pickup_commission,
+        delivery_commission=payload.delivery_commission
     )
 
 @router.post("/assign", response_model=DeliveryOut, status_code=status.HTTP_201_CREATED)
@@ -418,7 +420,7 @@ def update_delivery_boy_task_status(
     if current_user.role == "DELIVERY_BOY" and delivery.delivery_boy_id and delivery.delivery_boy_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
          
-    allowed_statuses = ["ON_THE_WAY", "REACHED", "OUT_FOR_DELIVERY", "REACHED_CUSTOMER", "ACCEPTED", "ASSIGNED", "PICKED", "DELIVERED"]
+    allowed_statuses = ["ON_THE_WAY", "REACHED", "OUT_FOR_DELIVERY", "REACHED_CUSTOMER", "ACCEPTED", "ASSIGNED", "PICKED", "DELIVERED", "PARTIALLY_PICKED_UP", "PARTIALLY_DELIVERED"]
     if payload.status not in allowed_statuses:
         raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of {allowed_statuses}")
          

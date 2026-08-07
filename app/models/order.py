@@ -36,6 +36,13 @@ class Order(BaseModel):
     pickup_history: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     delivery_history: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    pickup_commission: Mapped[Optional[Decimal]] = mapped_column(Numeric, default=0.0, nullable=True)
+    delivery_commission: Mapped[Optional[Decimal]] = mapped_column(Numeric, default=0.0, nullable=True)
+    pickup_staff_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    delivery_staff_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    pickup_commission_paid: Mapped[bool] = mapped_column(Boolean, default=False)
+    delivery_commission_paid: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Relationships
     company: Mapped["Company"] = relationship("Company", back_populates="orders")
     customer: Mapped["Customer"] = relationship("Customer", back_populates="orders")

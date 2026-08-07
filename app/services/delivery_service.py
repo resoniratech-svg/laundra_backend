@@ -21,7 +21,9 @@ class DeliveryService:
         order_id: UUID,
         delivery_boy_id: UUID = None,
         delivery_type: str,  # PICKUP / DELIVERY
-        tenant_id: UUID = None
+        tenant_id: UUID = None,
+        pickup_commission = None,
+        delivery_commission = None
     ) -> Delivery:
         if not tenant_id:
             tenant_id = get_current_tenant_id()
@@ -61,17 +63,31 @@ class DeliveryService:
                 User.tenant_id == tenant_id
             ).first()
 
-        # 3. Check for existing active (non-delivered) Delivery record for this order and type
+        # Update commission on order and delivery
+        if pickup_commission is not None:
+            order.pickup_commission = pickup_commission
+            if delivery_type == "PICKUP":
+                order.pickup_staff_id = delivery_boy_id
+        if delivery_commission is not None:
+            order.delivery_commission = delivery_commission
+            if delivery_type == "DELIVERY":
+                order.delivery_staff_id = delivery_boy_id
+
+        # 3. Check for existing active (uncompleted) Delivery record for this order and type
         existing_delivery = db.query(Delivery).filter(
             Delivery.order_id == target_order_id,
             Delivery.type == delivery_type,
             Delivery.tenant_id == tenant_id,
-            Delivery.status != "DELIVERED"
+            ~Delivery.status.in_(["DELIVERED", "PICKED", "COMPLETED", "PARTIALLY_PICKED_UP", "PARTIALLY_DELIVERED"])
         ).first()
 
         if existing_delivery:
             existing_delivery.delivery_boy_id = delivery_boy_id
             existing_delivery.status = "ASSIGNED"
+            if pickup_commission is not None:
+                existing_delivery.pickup_commission = pickup_commission
+            if delivery_commission is not None:
+                existing_delivery.delivery_commission = delivery_commission
             delivery = existing_delivery
         else:
             # Create a new delivery record (first time or previous batch was completed)
@@ -82,7 +98,9 @@ class DeliveryService:
                 delivery_boy_id=delivery_boy_id,
                 type=delivery_type,
                 status="ASSIGNED",
-                otp=DeliveryService.generate_otp()
+                otp=DeliveryService.generate_otp(),
+                pickup_commission=pickup_commission if pickup_commission is not None else getattr(order, 'pickup_commission', None),
+                delivery_commission=delivery_commission if delivery_commission is not None else getattr(order, 'delivery_commission', None)
             )
             db.add(delivery)
         

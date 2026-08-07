@@ -65,6 +65,14 @@ class OrderOut(OrderBase):
     created_at: datetime
     pickup_history: Optional[str] = None
     delivery_history: Optional[str] = None
+    pickup_commission: Optional[Decimal] = Decimal('0.0')
+    delivery_commission: Optional[Decimal] = Decimal('0.0')
+    pickup_staff_id: Optional[UUID] = None
+    delivery_staff_id: Optional[UUID] = None
+    pickup_commission_paid: bool = False
+    delivery_commission_paid: bool = False
+    pickup_courier: Optional[str] = None
+    delivery_courier: Optional[str] = None
     items: List[OrderItemOut] = []
 
     class Config:
