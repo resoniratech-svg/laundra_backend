@@ -152,13 +152,17 @@ def delete_user(
     from app.models.delivery import Delivery
     from app.models.payment import Payment
     from app.models.notification import Notification
+    from app.models.support_ticket import SupportTicket
+    from app.models.customer_support_ticket import CustomerSupportTicket
 
     try:
         db.query(LeaveRequest).filter(LeaveRequest.user_id == user_id).delete(synchronize_session=False)
         db.query(Attendance).filter(Attendance.user_id == user_id).delete(synchronize_session=False)
         db.query(Notification).filter(Notification.user_id == user_id).delete(synchronize_session=False)
-        db.query(Delivery).filter(Delivery.delivery_boy_id == user_id).update({Delivery.delivery_boy_id: None}, synchronize_session=False)
-        db.query(Payment).filter(Payment.delivery_boy_id == user_id).update({Payment.delivery_boy_id: None}, synchronize_session=False)
+        db.query(SupportTicket).filter(SupportTicket.user_id == user_id).delete(synchronize_session=False)
+        db.query(CustomerSupportTicket).filter(CustomerSupportTicket.user_id == user_id).delete(synchronize_session=False)
+        db.query(Delivery).filter(Delivery.delivery_boy_id == user_id).delete(synchronize_session=False)
+        db.query(Payment).filter(Payment.delivery_boy_id == user_id).delete(synchronize_session=False)
     except Exception as e:
         print(f"[WARN] Error during child record cascade delete for user {user_id}: {e}")
 
