@@ -533,3 +533,70 @@ def public_track_order(
         "delivery_boy": delivery_boy_info
     }
 
+
+@app.get("/privacy", response_class=HTMLResponse)
+@app.get("/data-deletion", response_class=HTMLResponse)
+def privacy_policy():
+    from fastapi.responses import HTMLResponse
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Privacy Policy & Account Data Deletion - Laundra Delivery</title>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1e293b; background-color: #f8fafc; margin: 0; padding: 40px 20px; }
+        .container { max-width: 800px; margin: 0 auto; background: #ffffff; padding: 40px; border-radius: 16px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+        h1 { color: #2563eb; margin-top: 0; font-size: 28px; }
+        h2 { color: #0f172a; margin-top: 28px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px; font-size: 20px; }
+        p, li { color: #475569; font-size: 15px; }
+        ul { padding-left: 20px; }
+        .contact-card { background: #eff6ff; border-left: 4px solid #2563eb; padding: 16px 20px; margin-top: 20px; border-radius: 8px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>Privacy Policy & Data Deletion Policy</h1>
+        <p><strong>Effective Date:</strong> August 10, 2026</p>
+        <p>This Privacy Policy explains how <strong>Laundra Delivery</strong> ("we", "us", or "our") collects, uses, and protects your information when you use our mobile application and delivery operations platform.</p>
+        
+        <h2>1. Information We Collect</h2>
+        <p>To provide reliable pickup and delivery services, we may collect:</p>
+        <ul>
+          <li><strong>Personal Details:</strong> Name, phone number, email address.</li>
+          <li><strong>Delivery Data:</strong> Order details, pickup/drop-off addresses, delivery completion logs.</li>
+          <li><strong>Device Information:</strong> App usage metrics, login authentication tokens.</li>
+        </ul>
+
+        <h2>2. How We Use Your Information</h2>
+        <ul>
+          <li>To assign, manage, and complete laundry pickup and delivery tasks.</li>
+          <li>To process delivery agent earnings, commissions, and shift management.</li>
+          <li>To provide customer support and operational announcements.</li>
+        </ul>
+
+        <h2>3. Data Sharing & Security</h2>
+        <p>We strictly do NOT sell or share your personal data with third-party advertisers. All data is encrypted in transit using SSL/TLS encryption and stored on secure cloud database servers.</p>
+
+        <h2>4. User Rights & Account Data Deletion Request</h2>
+        <p>You have the right to request access to or deletion of your account and associated personal data at any time.</p>
+        <p><strong>To request account data deletion:</strong></p>
+        <ul>
+          <li>Email our support team at <strong>kanikarapubhanup@gmail.com</strong> with the subject line <em>"Account Data Deletion Request"</em>.</li>
+          <li>Provide your registered phone number or email address.</li>
+          <li>Upon verification, your account and personal data will be permanently purged from our active systems within 30 days.</li>
+        </ul>
+
+        <h2>5. Contact Us</h2>
+        <div class="contact-card">
+          <p style="margin:0; font-weight:bold; color:#1e40af;">Laundra Delivery Operations Support</p>
+          <p style="margin:4px 0 0 0;">Email: <a href="mailto:kanikarapubhanup@gmail.com">kanikarapubhanup@gmail.com</a></p>
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+
