@@ -1,5 +1,6 @@
 from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import SQLAlchemyError
@@ -537,7 +538,6 @@ def public_track_order(
 @app.get("/privacy", response_class=HTMLResponse)
 @app.get("/data-deletion", response_class=HTMLResponse)
 def privacy_policy():
-    from fastapi.responses import HTMLResponse
     html_content = """
     <!DOCTYPE html>
     <html lang="en">
