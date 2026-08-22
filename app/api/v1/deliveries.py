@@ -459,6 +459,32 @@ def update_delivery_boy_task_status(
                 for i in all_items
             )
 
+            import json
+            from app.models.service import Service
+            del_items_log = []
+            for item in all_items:
+                srv = db.query(Service).filter(Service.id == item.service_id).first()
+                if item.delivered_quantity and item.delivered_quantity > 0:
+                    del_items_log.append({
+                        "service_name": srv.name if srv else "Item",
+                        "quantity": item.delivered_quantity
+                    })
+
+            if del_items_log:
+                existing_del_hist = []
+                if order.delivery_history:
+                    try:
+                        existing_del_hist = json.loads(order.delivery_history) if isinstance(order.delivery_history, str) else order.delivery_history
+                    except Exception:
+                        existing_del_hist = []
+
+                existing_del_hist.append({
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %I:%M %p"),
+                    "staff_name": current_user.name if (hasattr(current_user, 'name') and current_user.name) else "Delivery Staff",
+                    "items": del_items_log
+                })
+                order.delivery_history = json.dumps(existing_del_hist)
+
             if all_fully_delivered:
                 order.status = "DELIVERED"
                 order.delivery_status = "Delivered"
@@ -674,5 +700,115 @@ def accept_delivery_task(
     db.commit()
     db.refresh(delivery)
     return delivery
+
+
+class MarkCommissionPaidRequest(BaseModel):
+    staff_id: Optional[str] = None
+    staff_name: Optional[str] = None
+    delivery_ids: Optional[List[str]] = []
+    order_ids: Optional[List[str]] = []
+    payment_method: Optional[str] = "Cash"
+
+@router.post("/mark-commission-paid")
+def mark_commission_paid(
+    payload: MarkCommissionPaidRequest,
+    current_admin: User = Depends(get_current_admin_or_cashier),
+    db: Session = Depends(get_db)
+):
+    from app.models.delivery import Delivery
+    from app.models.order import Order
+    from app.models.audit_log import AuditLog
+    from uuid import uuid4
+
+    tenant_id = current_admin.tenant_id
+    updated_count = 0
+
+    if payload.delivery_ids:
+        deliv_uuids = []
+        for d_id in payload.delivery_ids:
+            try:
+                deliv_uuids.append(UUID(d_id))
+            except Exception:
+                pass
+        
+        if deliv_uuids:
+            deliveries = db.query(Delivery).filter(
+                Delivery.id.in_(deliv_uuids),
+                Delivery.tenant_id == tenant_id
+            ).all()
+
+            for d in deliveries:
+                if d.type == "PICKUP":
+                    d.pickup_commission_paid = True
+                    d.pickup_payment_method = payload.payment_method
+                elif d.type == "DELIVERY":
+                    d.delivery_commission_paid = True
+                    d.delivery_payment_method = payload.payment_method
+                else:
+                    d.pickup_commission_paid = True
+                    d.delivery_commission_paid = True
+                    d.pickup_payment_method = payload.payment_method
+                    d.delivery_payment_method = payload.payment_method
+                updated_count += 1
+
+                if d.order_id:
+                    ord_obj = db.query(Order).filter(Order.id == d.order_id, Order.tenant_id == tenant_id).first()
+                    if ord_obj:
+                        if d.type == "PICKUP":
+                            ord_obj.pickup_commission_paid = True
+                            ord_obj.pickup_payment_method = payload.payment_method
+                        elif d.type == "DELIVERY":
+                            ord_obj.delivery_commission_paid = True
+                            ord_obj.delivery_payment_method = payload.payment_method
+                        else:
+                            ord_obj.pickup_commission_paid = True
+                            ord_obj.delivery_commission_paid = True
+                            ord_obj.pickup_payment_method = payload.payment_method
+                            ord_obj.delivery_payment_method = payload.payment_method
+
+    if payload.order_ids:
+        ord_uuids = []
+        for o_id in payload.order_ids:
+            try:
+                ord_uuids.append(UUID(o_id))
+            except Exception:
+                pass
+
+        if ord_uuids:
+            orders = db.query(Order).filter(
+                Order.id.in_(ord_uuids),
+                Order.tenant_id == tenant_id
+            ).all()
+
+            for o in orders:
+                o.pickup_commission_paid = True
+                o.delivery_commission_paid = True
+                o.pickup_payment_method = payload.payment_method
+                o.delivery_payment_method = payload.payment_method
+                updated_count += 1
+
+                delivs = db.query(Delivery).filter(Delivery.order_id == o.id, Delivery.tenant_id == tenant_id).all()
+                for d in delivs:
+                    d.pickup_commission_paid = True
+                    d.delivery_commission_paid = True
+                    d.pickup_payment_method = payload.payment_method
+                    d.delivery_payment_method = payload.payment_method
+
+    audit_log = AuditLog(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        user_id=current_admin.id,
+        action=f"Marked commission as paid via {payload.payment_method} for staff {payload.staff_name or payload.staff_id}",
+        module="DELIVERIES"
+    )
+    db.add(audit_log)
+    db.commit()
+
+    return {
+        "success": True,
+        "message": f"Successfully marked commission as paid for {updated_count} items via {payload.payment_method}",
+        "updated_count": updated_count
+    }
+
 
 

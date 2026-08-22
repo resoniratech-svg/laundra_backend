@@ -172,6 +172,54 @@ class DeliveryService:
             else:
                 order.status = "DELIVERED"
                 
+            # Record history log
+            import json
+            from app.models.order_item import OrderItem
+            from app.models.service import Service
+            from app.models.user import User
+
+            staff_name = "Delivery Staff"
+            if delivery.delivery_boy_id:
+                driver_user = db.query(User).filter(User.id == delivery.delivery_boy_id).first()
+                if driver_user and driver_user.name:
+                    staff_name = driver_user.name
+
+            order_items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
+            item_logs = []
+            for oi in order_items:
+                srv = db.query(Service).filter(Service.id == oi.service_id).first()
+                s_name = srv.name if srv else "Laundry Item"
+                qty = oi.delivered_quantity if (delivery.type == "DELIVERY" and oi.delivered_quantity and oi.delivered_quantity > 0) else (oi.picked_up_quantity if (oi.picked_up_quantity and oi.picked_up_quantity > 0) else (oi.quantity or 1))
+                item_logs.append({
+                    "service_name": s_name,
+                    "quantity": qty
+                })
+
+            new_log_entry = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %I:%M %p"),
+                "staff_name": staff_name,
+                "items": item_logs
+            }
+
+            if delivery.type == "DELIVERY":
+                existing_history = []
+                if order.delivery_history:
+                    try:
+                        existing_history = json.loads(order.delivery_history) if isinstance(order.delivery_history, str) else order.delivery_history
+                    except Exception:
+                        existing_history = []
+                existing_history.append(new_log_entry)
+                order.delivery_history = json.dumps(existing_history)
+            else:
+                existing_history = []
+                if order.pickup_history:
+                    try:
+                        existing_history = json.loads(order.pickup_history) if isinstance(order.pickup_history, str) else order.pickup_history
+                    except Exception:
+                        existing_history = []
+                existing_history.append(new_log_entry)
+                order.pickup_history = json.dumps(existing_history)
+
             # Customer Notification
             from app.models.notification import Notification
             title_text = "laundry Picked Up" if delivery.type == "PICKUP" else "laundry Delivered"

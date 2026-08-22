@@ -24,6 +24,10 @@ class DeliveryOut(BaseModel):
     notes: Optional[str] = None
     pickup_commission: Optional[Decimal] = Decimal('0.0')
     delivery_commission: Optional[Decimal] = Decimal('0.0')
+    pickup_commission_paid: Optional[bool] = False
+    delivery_commission_paid: Optional[bool] = False
+    pickup_payment_method: Optional[str] = None
+    delivery_payment_method: Optional[str] = None
 
     class Config:
         from_attributes = True

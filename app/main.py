@@ -253,6 +253,16 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 19 failed: {e}")
 
+# Isolated migration 20 – payment_method columns for commissions in deliveries and orders
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS pickup_payment_method VARCHAR(50);"))
+        conn.execute(text("ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS delivery_payment_method VARCHAR(50);"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_payment_method VARCHAR(50);"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_payment_method VARCHAR(50);"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 20 failed: {e}")
+
 try:
     import alembic.config
     import alembic.command

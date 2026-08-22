@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, String, DateTime, Numeric
+from sqlalchemy import ForeignKey, String, DateTime, Numeric, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import BaseModel
@@ -20,6 +20,10 @@ class Delivery(BaseModel):
     notes: Mapped[Optional[str]] = mapped_column(String(1000))
     pickup_commission: Mapped[Optional[Decimal]] = mapped_column(Numeric, default=0.0, nullable=True)
     delivery_commission: Mapped[Optional[Decimal]] = mapped_column(Numeric, default=0.0, nullable=True)
+    pickup_commission_paid: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)
+    delivery_commission_paid: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)
+    pickup_payment_method: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    delivery_payment_method: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Relationships
     company: Mapped["Company"] = relationship("Company", back_populates="deliveries")
