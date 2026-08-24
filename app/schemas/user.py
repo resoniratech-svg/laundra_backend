@@ -26,6 +26,7 @@ class UserCreate(UserBase):
 class UserOut(UserBase):
     id: UUID
     tenant_id: Optional[UUID] = None
+    company_name: Optional[str] = None
     status: str
     created_at: datetime
 

@@ -98,6 +98,12 @@ class AuthService:
                     detail="Your company's subscription has expired or is suspended. Please contact support."
                 )
         
+        company_name = None
+        if user.tenant_id:
+            comp = db.query(Company).filter(Company.id == user.tenant_id).first()
+            if comp:
+                company_name = comp.name
+
         token = create_access_token(
             subject=user.id,
             role=user.role,
@@ -113,6 +119,7 @@ class AuthService:
                 "email": user.email,
                 "role": user.role,
                 "tenant_id": str(user.tenant_id) if user.tenant_id else None,
+                "company_name": company_name,
                 "status": user.status
             }
         }

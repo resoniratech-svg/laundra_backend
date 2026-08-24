@@ -263,8 +263,13 @@ def login(
 
 @router.get("/me", response_model=UserOut)
 def me(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
+    if current_user.tenant_id:
+        comp = db.query(Company).filter(Company.id == current_user.tenant_id).first()
+        if comp:
+            setattr(current_user, 'company_name', comp.name)
     return current_user
 
 # Simple in-memory dict to store OTP codes
