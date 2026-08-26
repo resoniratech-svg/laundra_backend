@@ -70,6 +70,7 @@ def list_orders(
         )
     from app.models.customer_package import CustomerPackage
     from app.models.service import Service
+    from app.models.delivery import Delivery
     orders = order_repo.get_multi(db, tenant_id=current_user.tenant_id)
     for o in orders:
         o.items = db.query(OrderItem).filter(OrderItem.order_id == o.id).all()
@@ -81,6 +82,43 @@ def list_orders(
             cp = db.query(CustomerPackage).filter(CustomerPackage.id == o.applied_package_id).first()
             if cp and cp.package:
                 setattr(o, 'package_name', cp.package.name)
+        
+        # Resolve pickup courier & commission
+        if not getattr(o, 'pickup_courier', None):
+            if o.pickup_staff_id:
+                p_user = db.query(User).filter(User.id == o.pickup_staff_id).first()
+                if p_user:
+                    setattr(o, 'pickup_courier', p_user.name)
+            if not getattr(o, 'pickup_courier', None):
+                p_deliv = db.query(Delivery).filter(Delivery.order_id == o.id, Delivery.type == "PICKUP").first()
+                if p_deliv:
+                    if p_deliv.delivery_boy_id:
+                        p_user = db.query(User).filter(User.id == p_deliv.delivery_boy_id).first()
+                        if p_user:
+                            setattr(o, 'pickup_courier', p_user.name)
+                    else:
+                        setattr(o, 'pickup_courier', 'All Delivery Staff')
+                    if p_deliv.pickup_commission is not None and not getattr(o, 'pickup_commission', None):
+                        setattr(o, 'pickup_commission', p_deliv.pickup_commission)
+
+        # Resolve delivery courier & commission
+        if not getattr(o, 'delivery_courier', None):
+            if o.delivery_staff_id:
+                d_user = db.query(User).filter(User.id == o.delivery_staff_id).first()
+                if d_user:
+                    setattr(o, 'delivery_courier', d_user.name)
+            if not getattr(o, 'delivery_courier', None):
+                d_deliv = db.query(Delivery).filter(Delivery.order_id == o.id, Delivery.type == "DELIVERY").first()
+                if d_deliv:
+                    if d_deliv.delivery_boy_id:
+                        d_user = db.query(User).filter(User.id == d_deliv.delivery_boy_id).first()
+                        if d_user:
+                            setattr(o, 'delivery_courier', d_user.name)
+                    else:
+                        setattr(o, 'delivery_courier', 'All Delivery Staff')
+                    if d_deliv.delivery_commission is not None and not getattr(o, 'delivery_commission', None):
+                        setattr(o, 'delivery_commission', d_deliv.delivery_commission)
+
     return orders
 
 @router.get("/{id}", response_model=OrderOut)
@@ -96,6 +134,7 @@ def get_order(
         )
     from app.models.customer_package import CustomerPackage
     from app.models.service import Service
+    from app.models.delivery import Delivery
     
     order = None
     try:
@@ -120,6 +159,42 @@ def get_order(
         cp = db.query(CustomerPackage).filter(CustomerPackage.id == order.applied_package_id).first()
         if cp and cp.package:
             setattr(order, 'package_name', cp.package.name)
+
+    # Resolve pickup & delivery courier names
+    if not getattr(order, 'pickup_courier', None):
+        if order.pickup_staff_id:
+            p_user = db.query(User).filter(User.id == order.pickup_staff_id).first()
+            if p_user:
+                setattr(order, 'pickup_courier', p_user.name)
+        if not getattr(order, 'pickup_courier', None):
+            p_deliv = db.query(Delivery).filter(Delivery.order_id == order.id, Delivery.type == "PICKUP").first()
+            if p_deliv:
+                if p_deliv.delivery_boy_id:
+                    p_user = db.query(User).filter(User.id == p_deliv.delivery_boy_id).first()
+                    if p_user:
+                        setattr(order, 'pickup_courier', p_user.name)
+                else:
+                    setattr(order, 'pickup_courier', 'All Delivery Staff')
+                if p_deliv.pickup_commission is not None and not getattr(order, 'pickup_commission', None):
+                    setattr(order, 'pickup_commission', p_deliv.pickup_commission)
+
+    if not getattr(order, 'delivery_courier', None):
+        if order.delivery_staff_id:
+            d_user = db.query(User).filter(User.id == order.delivery_staff_id).first()
+            if d_user:
+                setattr(order, 'delivery_courier', d_user.name)
+        if not getattr(order, 'delivery_courier', None):
+            d_deliv = db.query(Delivery).filter(Delivery.order_id == order.id, Delivery.type == "DELIVERY").first()
+            if d_deliv:
+                if d_deliv.delivery_boy_id:
+                    d_user = db.query(User).filter(User.id == d_deliv.delivery_boy_id).first()
+                    if d_user:
+                        setattr(order, 'delivery_courier', d_user.name)
+                else:
+                    setattr(order, 'delivery_courier', 'All Delivery Staff')
+                if d_deliv.delivery_commission is not None and not getattr(order, 'delivery_commission', None):
+                    setattr(order, 'delivery_commission', d_deliv.delivery_commission)
+
     return order
 
 @router.patch("/{id}/status", response_model=OrderOut)

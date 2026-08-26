@@ -62,6 +62,22 @@ class OrderService:
         final_pickup_address = pickup_address or getattr(customer, 'address', None) or 'Pickup at Branch'
         final_delivery_address = delivery_address or getattr(customer, 'address', None) or 'Delivery at Branch'
 
+        # Check for existing order by order_number (Idempotent Deduplication)
+        if order_number:
+            clean_num = str(order_number).replace('#', '').strip()
+            existing_order = db.query(Order).filter(
+                Order.order_number == clean_num,
+                Order.tenant_id == tenant_id
+            ).first()
+            if existing_order:
+                if payment_status and str(payment_status).upper() in ["PAID", "COMPLETED"]:
+                    existing_order.payment_status = "PAID"
+                    if paid_amount is not None:
+                        existing_order.paid_amount = Decimal(str(paid_amount))
+                db.commit()
+                db.refresh(existing_order)
+                return existing_order
+
         # 2. Process order items & calculate total amount
         total_amount = Decimal("0.0")
         items_to_create = []
