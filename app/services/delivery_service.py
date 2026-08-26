@@ -108,7 +108,7 @@ class DeliveryService:
         ).first()
 
         if existing_delivery:
-            existing_delivery.delivery_boy_id = delivery_boy_id
+            existing_delivery.delivery_boy_id = driver_uuid or (boy.id if boy else None)
             existing_delivery.status = "ASSIGNED"
             if pickup_commission is not None:
                 existing_delivery.pickup_commission = pickup_commission
