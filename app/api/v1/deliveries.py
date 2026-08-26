@@ -44,6 +44,7 @@ def assign_delivery(
         db,
         order_id=payload.order_id,
         delivery_boy_id=payload.delivery_boy_id,
+        courier_name=payload.courier_name,
         delivery_type=payload.type,
         tenant_id=current_admin.tenant_id,
         pickup_commission=payload.pickup_commission,

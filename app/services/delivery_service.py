@@ -18,8 +18,9 @@ class DeliveryService:
     def assign_delivery(
         db: Session,
         *,
-        order_id: UUID,
-        delivery_boy_id: UUID = None,
+        order_id: str,
+        delivery_boy_id: str = None,
+        courier_name: str = None,
         delivery_type: str,  # PICKUP / DELIVERY
         tenant_id: UUID = None,
         pickup_commission = None,
@@ -35,16 +36,21 @@ class DeliveryService:
 
         # 1. Verify Order (by UUID or string order_number)
         from sqlalchemy import or_
+        clean_id = str(order_id).replace('#', '').strip()
+        order = None
         try:
             from uuid import UUID as PyUUID
-            val_uuid = PyUUID(str(order_id))
+            val_uuid = PyUUID(clean_id)
             order = db.query(Order).filter(
-                or_(Order.id == val_uuid, Order.order_number == str(order_id)),
+                or_(Order.id == val_uuid, Order.order_number == clean_id),
                 Order.tenant_id == tenant_id
             ).first()
-        except ValueError:
+        except (ValueError, TypeError):
+            pass
+
+        if not order:
             order = db.query(Order).filter(
-                Order.order_number == str(order_id),
+                Order.order_number == clean_id,
                 Order.tenant_id == tenant_id
             ).first()
 
@@ -56,22 +62,42 @@ class DeliveryService:
 
         target_order_id = order.id
 
-        # 2. Verify Delivery Boy if provided
+        # 2. Verify Delivery Boy if provided (by UUID or Name)
+        boy = None
+        driver_uuid = None
+        resolved_name = courier_name or (str(delivery_boy_id) if delivery_boy_id else None)
+
         if delivery_boy_id:
+            try:
+                from uuid import UUID as PyUUID
+                driver_uuid = PyUUID(str(delivery_boy_id))
+                boy = db.query(User).filter(User.id == driver_uuid, User.tenant_id == tenant_id).first()
+            except (ValueError, TypeError):
+                pass
+
+        if not boy and resolved_name:
             boy = db.query(User).filter(
-                User.id == delivery_boy_id,
+                User.name.ilike(resolved_name),
                 User.tenant_id == tenant_id
             ).first()
+            if boy:
+                driver_uuid = boy.id
 
-        # Update commission on order and delivery
-        if pickup_commission is not None:
-            order.pickup_commission = pickup_commission
-            if delivery_type == "PICKUP":
-                order.pickup_staff_id = delivery_boy_id
-        if delivery_commission is not None:
-            order.delivery_commission = delivery_commission
-            if delivery_type == "DELIVERY":
-                order.delivery_staff_id = delivery_boy_id
+        final_courier_name = (boy.name if boy else resolved_name) if resolved_name and resolved_name not in ['-- Unassigned --', 'Unassigned'] else None
+
+        # Update courier and commission on order
+        if delivery_type == "PICKUP":
+            if pickup_commission is not None:
+                order.pickup_commission = pickup_commission
+            if final_courier_name:
+                order.pickup_courier = final_courier_name
+                order.pickup_staff_id = driver_uuid
+        elif delivery_type == "DELIVERY":
+            if delivery_commission is not None:
+                order.delivery_commission = delivery_commission
+            if final_courier_name:
+                order.delivery_courier = final_courier_name
+                order.delivery_staff_id = driver_uuid
 
         # 3. Check for existing active (uncompleted) Delivery record for this order and type
         existing_delivery = db.query(Delivery).filter(

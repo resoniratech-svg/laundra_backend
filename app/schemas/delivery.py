@@ -5,8 +5,9 @@ from uuid import UUID
 from datetime import datetime
 
 class DeliveryCreate(BaseModel):
-    order_id: UUID
-    delivery_boy_id: Optional[UUID] = None
+    order_id: str
+    delivery_boy_id: Optional[str] = None
+    courier_name: Optional[str] = None
     type: str  # PICKUP / DELIVERY
     pickup_commission: Optional[Decimal] = Decimal('0.0')
     delivery_commission: Optional[Decimal] = Decimal('0.0')
