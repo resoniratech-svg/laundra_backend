@@ -212,18 +212,28 @@ def update_order(
 
 @router.delete("/{id}", status_code=status.HTTP_200_OK)
 def delete_order(
-    id: UUID,
+    id: str,
     current_admin: User = Depends(get_current_admin_or_cashier),
     db: Session = Depends(get_db)
 ):
-    order = order_repo.get(db, id, tenant_id=current_admin.tenant_id)
+    # Try finding order by UUID first, then fallback to order_number
+    order = None
+    try:
+        uuid_val = UUID(id)
+        order = order_repo.get(db, uuid_val, tenant_id=current_admin.tenant_id)
+    except (ValueError, TypeError):
+        pass
+
+    if not order:
+        order = db.query(Order).filter(Order.order_number == id, Order.tenant_id == current_admin.tenant_id).first()
+
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Order not found"
         )
     # Hard delete: remove order items first, then the order itself
-    db.query(OrderItem).filter(OrderItem.order_id == id).delete()
+    db.query(OrderItem).filter(OrderItem.order_id == order.id).delete()
     db.delete(order)
     db.commit()
     return {"success": True, "message": "Order permanently deleted"}
