@@ -36,7 +36,8 @@ class OrderService:
         special_instructions: str = None,
         pickup_date: datetime = None,
         payment_status: str = None,
-        paid_amount: Decimal = None
+        paid_amount: Decimal = None,
+        order_number: str = None
     ) -> Order:
         if not tenant_id:
             tenant_id = get_current_tenant_id()
@@ -143,7 +144,7 @@ class OrderService:
             id=order_id,
             tenant_id=tenant_id,
             customer_id=customer_id,
-            order_number=OrderService.generate_order_number(),
+            order_number=str(order_number) if order_number else OrderService.generate_order_number(),
             status="CREATED",
             total_amount=final_amount,
             discount=discount,
