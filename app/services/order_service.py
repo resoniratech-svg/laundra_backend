@@ -34,7 +34,9 @@ class OrderService:
         pickup_address: str = None,
         delivery_address: str = None,
         special_instructions: str = None,
-        pickup_date: datetime = None
+        pickup_date: datetime = None,
+        payment_status: str = None,
+        paid_amount: Decimal = None
     ) -> Order:
         if not tenant_id:
             tenant_id = get_current_tenant_id()
@@ -125,6 +127,18 @@ class OrderService:
 
         # 4. Create Order
         order_id = uuid4()
+        
+        # Calculate initial payment status & paid amount
+        computed_payment_status = "UNPAID"
+        computed_paid_amount = Decimal("0.0")
+        
+        if payment_status and str(payment_status).upper() in ["PAID", "COMPLETED"]:
+            computed_payment_status = "PAID"
+            computed_paid_amount = final_amount if paid_amount is None else Decimal(str(paid_amount))
+        elif paid_amount and Decimal(str(paid_amount)) >= final_amount and final_amount > 0:
+            computed_payment_status = "PAID"
+            computed_paid_amount = Decimal(str(paid_amount))
+
         order = Order(
             id=order_id,
             tenant_id=tenant_id,
@@ -133,8 +147,8 @@ class OrderService:
             status="CREATED",
             total_amount=final_amount,
             discount=discount,
-            paid_amount=Decimal("0.0"),
-            payment_status="UNPAID",
+            paid_amount=computed_paid_amount,
+            payment_status=computed_payment_status,
             qr_code=f"https://laundrysaas.com/orders/{order_id}/qr",
             is_express=is_express,
             applied_package_id=pay_with_package_id,

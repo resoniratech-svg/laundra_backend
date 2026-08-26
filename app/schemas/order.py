@@ -39,6 +39,8 @@ class OrderCreate(OrderBase):
     delivery_address: Optional[str] = None
     special_instructions: Optional[str] = None
     pickup_date: Optional[datetime] = None
+    payment_status: Optional[str] = None
+    paid_amount: Optional[Decimal] = None
 
 class OrderOut(OrderBase):
     id: UUID

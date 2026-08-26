@@ -47,7 +47,9 @@ def create_order(
         pickup_address=order_in.pickup_address,
         delivery_address=order_in.delivery_address,
         special_instructions=order_in.special_instructions,
-        pickup_date=order_in.pickup_date
+        pickup_date=order_in.pickup_date,
+        payment_status=order_in.payment_status,
+        paid_amount=order_in.paid_amount
     )
     if order.applied_package_id:
         cp = db.query(CustomerPackage).filter(CustomerPackage.id == order.applied_package_id).first()
