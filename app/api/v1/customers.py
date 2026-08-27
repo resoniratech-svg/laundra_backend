@@ -159,7 +159,7 @@ def create_customer(
         gender=customer_in.gender,
         dob=customer_in.dob,
         gst_number=customer_in.gst_number,
-        notes=customer_in.notes
+        notes=f"Registered by Delivery Agent: {current_admin.name}" + (f" | {customer_in.notes}" if customer_in.notes else "") if current_admin.role == "DELIVERY_BOY" else customer_in.notes
     )
     db.add(new_customer)
     db.commit()

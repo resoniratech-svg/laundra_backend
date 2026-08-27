@@ -49,9 +49,24 @@ def create_order(
         special_instructions=order_in.special_instructions,
         pickup_date=order_in.pickup_date,
         payment_status=order_in.payment_status,
+        payment_method=order_in.payment_method,
         paid_amount=order_in.paid_amount,
         order_number=order_in.order_number
     )
+    if order_in.payment_method:
+        setattr(order, 'payment_method', order_in.payment_method)
+    if current_admin.role == "DELIVERY_BOY":
+        order.pickup_staff_id = current_admin.id
+        order.pickup_courier = current_admin.name
+        order.status = "Fully Picked Up"
+        order.special_instructions = f"Field Order created by Delivery Agent {current_admin.name}"
+        for it in order.items:
+            it.picked_up_quantity = it.ordered_quantity or it.quantity
+            it.pickup_pending_quantity = 0
+            it.item_status = "FULLY_PICKED_UP"
+        db.commit()
+        db.refresh(order)
+
     if order.applied_package_id:
         cp = db.query(CustomerPackage).filter(CustomerPackage.id == order.applied_package_id).first()
         if cp and cp.package:
@@ -119,6 +134,9 @@ def list_orders(
                     if d_deliv.delivery_commission is not None and not getattr(o, 'delivery_commission', None):
                         setattr(o, 'delivery_commission', d_deliv.delivery_commission)
 
+        pm = getattr(o, 'pickup_payment_method', None) or getattr(o, 'delivery_payment_method', None) or 'CASH'
+        setattr(o, 'payment_method', pm)
+
     return orders
 
 @router.get("/{id}", response_model=OrderOut)
@@ -151,7 +169,12 @@ def get_order(
             detail="Order not found"
         )
     order.items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
+    is_pickup_done = (order.status or "").lower() in ["fully picked up", "fully_picked_up", "fully picked up at store", "received", "sorting", "washing", "drying", "ironing", "ready", "out for delivery", "delivered", "fully delivered at store"]
     for item in order.items:
+        if is_pickup_done and (item.picked_up_quantity is None or item.picked_up_quantity == 0):
+            item.picked_up_quantity = item.ordered_quantity or item.quantity
+            item.pickup_pending_quantity = 0
+            item.item_status = "FULLY_PICKED_UP"
         svc = db.query(Service).filter(Service.id == item.service_id).first()
         if svc:
             setattr(item, 'service_name', svc.name)

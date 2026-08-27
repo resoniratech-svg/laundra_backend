@@ -1,11 +1,11 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Union
 from decimal import Decimal
 from uuid import UUID
 from datetime import datetime
 
 class OrderItemBase(BaseModel):
-    service_id: UUID
+    service_id: Union[UUID, str]
     quantity: int
 
 class OrderItemCreate(OrderItemBase):
@@ -28,7 +28,7 @@ class OrderItemOut(OrderItemBase):
         from_attributes = True
 
 class OrderBase(BaseModel):
-    customer_id: UUID
+    customer_id: Union[UUID, str]
 
 class OrderCreate(OrderBase):
     items: List[OrderItemCreate]
@@ -40,6 +40,7 @@ class OrderCreate(OrderBase):
     special_instructions: Optional[str] = None
     pickup_date: Optional[datetime] = None
     payment_status: Optional[str] = None
+    payment_method: Optional[str] = None
     paid_amount: Optional[Decimal] = None
     order_number: Optional[str] = None
 
@@ -52,6 +53,7 @@ class OrderOut(OrderBase):
     discount: Optional[Decimal] = Decimal('0.0')
     paid_amount: Optional[Decimal] = Decimal('0.0')
     payment_status: Optional[str] = None
+    payment_method: Optional[str] = None
     package_name: Optional[str] = None
     applied_package_id: Optional[UUID] = None
     qr_code: Optional[str] = None

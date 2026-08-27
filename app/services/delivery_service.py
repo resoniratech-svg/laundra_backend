@@ -99,42 +99,58 @@ class DeliveryService:
                 order.delivery_courier = final_courier_name
                 order.delivery_staff_id = driver_uuid
 
-        # 3. Check for existing active (uncompleted) Delivery record for this order and type
-        existing_delivery = db.query(Delivery).filter(
+        # 3. Check for existing Delivery record for this order and type
+        existing_deliveries = db.query(Delivery).filter(
             Delivery.order_id == target_order_id,
             Delivery.type == delivery_type,
-            Delivery.tenant_id == tenant_id,
-            ~Delivery.status.in_(["DELIVERED", "PICKED", "COMPLETED", "PARTIALLY_PICKED_UP", "PARTIALLY_DELIVERED"])
-        ).first()
+            Delivery.tenant_id == tenant_id
+        ).order_by(Delivery.created_at.desc()).all()
 
-        if existing_delivery:
+        # Determine delivery initial status
+        is_order_pickup_done = order.status in ["Fully Picked Up", "RECEIVED", "WASHING", "IRONING", "READY", "OUT_FOR_DELIVERY", "DELIVERED", "COMPLETED"]
+
+        if existing_deliveries:
+            existing_delivery = existing_deliveries[0]
             existing_delivery.delivery_boy_id = driver_uuid or (boy.id if boy else None)
-            existing_delivery.status = "ASSIGNED"
+            if delivery_type == "PICKUP" and is_order_pickup_done:
+                if existing_delivery.status != "DELIVERED":
+                    existing_delivery.status = "PICKED"
+            elif existing_delivery.status not in ["DELIVERED", "PICKED"]:
+                existing_delivery.status = "ASSIGNED"
+            
             if pickup_commission is not None:
                 existing_delivery.pickup_commission = pickup_commission
             if delivery_commission is not None:
                 existing_delivery.delivery_commission = delivery_commission
             delivery = existing_delivery
+
+            # Clean up any duplicate delivery records for this order and type
+            if len(existing_deliveries) > 1:
+                for dup in existing_deliveries[1:]:
+                    db.delete(dup)
         else:
-            # Create a new delivery record (first time or previous batch was completed)
+            # Create a new delivery record
+            delivery_initial_status = "PICKED" if (delivery_type == "PICKUP" and is_order_pickup_done) else "ASSIGNED"
             delivery = Delivery(
                 id=uuid4(),
                 tenant_id=tenant_id,
                 order_id=target_order_id,
-                delivery_boy_id=delivery_boy_id,
+                delivery_boy_id=driver_uuid or (boy.id if boy else None),
                 type=delivery_type,
-                status="ASSIGNED",
+                status=delivery_initial_status,
                 otp=DeliveryService.generate_otp(),
-                pickup_commission=pickup_commission if pickup_commission is not None else getattr(order, 'pickup_commission', None),
-                delivery_commission=delivery_commission if delivery_commission is not None else getattr(order, 'delivery_commission', None)
+                pickup_commission=pickup_commission if pickup_commission is not None else (getattr(order, 'pickup_commission', None) or 0.0),
+                delivery_commission=delivery_commission if delivery_commission is not None else (getattr(order, 'delivery_commission', None) or 0.0)
             )
             db.add(delivery)
         
-        # 4. Update Order Status
+        # 4. Update Order Status only if not already advanced/completed
         if delivery_type == "PICKUP":
-            order.status = "ASSIGNED"
+            if not is_order_pickup_done:
+                order.status = "ASSIGNED"
         else:
-            order.status = "OUT_FOR_DELIVERY"
+            if order.status not in ["DELIVERED", "Fully Delivered at Store"]:
+                order.status = "OUT_FOR_DELIVERY"
         db.commit()
         db.refresh(delivery)
         return delivery

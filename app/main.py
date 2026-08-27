@@ -258,6 +258,7 @@ try:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS pickup_payment_method VARCHAR(50);"))
         conn.execute(text("ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS delivery_payment_method VARCHAR(50);"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50);"))
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_payment_method VARCHAR(50);"))
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_payment_method VARCHAR(50);"))
 except Exception as e:

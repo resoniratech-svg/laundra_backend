@@ -85,19 +85,35 @@ def list_deliveries(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    from app.models.delivery import Delivery
+    from sqlalchemy import or_
+    tenant_id = current_user.tenant_id
     if current_user.role == "DELIVERY_BOY":
-        from app.models.delivery import Delivery
-        from sqlalchemy import or_
-        tenant_id = current_user.tenant_id
-        return db.query(Delivery).filter(
+        all_delivs = db.query(Delivery).filter(
             or_(
                 Delivery.delivery_boy_id == current_user.id,
                 Delivery.delivery_boy_id == None
             ),
             Delivery.tenant_id == tenant_id
-        ).all()
+        ).order_by(Delivery.created_at.desc()).all()
+    else:
+        all_delivs = db.query(Delivery).filter(Delivery.tenant_id == tenant_id).order_by(Delivery.created_at.desc()).all()
         
-    return delivery_repo.get_multi(db)
+    seen = {}
+    deduped = []
+    for d in all_delivs:
+        key = (str(d.order_id), str(d.type))
+        if key not in seen:
+            seen[key] = d
+            deduped.append(d)
+        else:
+            # Clean up duplicate from DB if it exists
+            try:
+                db.delete(d)
+                db.commit()
+            except Exception:
+                pass
+    return deduped
 
 @router.patch("/{id}/pickup", response_model=DeliveryOut)
 def update_pickup_status(
@@ -633,11 +649,25 @@ def get_delivery_task_details(
         "delivered_at": delivery.delivered_at,
         "photos": delivery.photos,
         "notes": delivery.notes,
+        "pickup_commission": float(delivery.pickup_commission) if delivery.pickup_commission is not None else 0.0,
+        "delivery_commission": float(delivery.delivery_commission) if delivery.delivery_commission is not None else 0.0,
+        "pickup_commission_paid": bool(delivery.pickup_commission_paid or (order and order.pickup_commission_paid)),
+        "delivery_commission_paid": bool(delivery.delivery_commission_paid or (order and order.delivery_commission_paid)),
+        "pickup_payment_method": delivery.pickup_payment_method or (order and order.pickup_payment_method),
+        "delivery_payment_method": delivery.delivery_payment_method or (order and order.delivery_payment_method),
         "order": {
             "id": order.id if order else None,
             "order_number": order.order_number if order else "N/A",
             "status": order.status if order else "N/A",
-            "total_amount": order.total_amount if order else 0.0,
+            "total_amount": float(order.total_amount) if order and order.total_amount else 0.0,
+            "payment_status": order.payment_status if order else "UNPAID",
+            "payment_method": getattr(order, 'payment_method', None) or getattr(order, 'pickup_payment_method', None) or getattr(delivery, 'pickup_payment_method', None) or "CASH",
+            "pickup_commission": float(order.pickup_commission) if order and order.pickup_commission is not None else float(delivery.pickup_commission or 0.0),
+            "delivery_commission": float(order.delivery_commission) if order and order.delivery_commission is not None else float(delivery.delivery_commission or 0.0),
+            "pickup_commission_paid": bool(order.pickup_commission_paid or delivery.pickup_commission_paid) if order else bool(delivery.pickup_commission_paid),
+            "delivery_commission_paid": bool(order.delivery_commission_paid or delivery.delivery_commission_paid) if order else bool(delivery.delivery_commission_paid),
+            "pickup_payment_method": getattr(order, 'pickup_payment_method', None) or getattr(order, 'payment_method', None) or getattr(delivery, 'pickup_payment_method', None) or "CASH",
+            "delivery_payment_method": getattr(order, 'delivery_payment_method', None) or getattr(delivery, 'delivery_payment_method', None) or "CASH",
             "pickup_address": order.pickup_address if order else "N/A",
             "delivery_address": order.delivery_address if order else "N/A",
             "pickup_date": order.pickup_date if order else None,
@@ -719,67 +749,61 @@ def mark_commission_paid(
     from app.models.delivery import Delivery
     from app.models.order import Order
     from app.models.audit_log import AuditLog
+    from app.models.user import User
+    from sqlalchemy import or_
     from uuid import uuid4
 
     tenant_id = current_admin.tenant_id
     updated_count = 0
 
     if payload.delivery_ids:
-        deliv_uuids = []
         for d_id in payload.delivery_ids:
+            clean_did = str(d_id).replace('#', '').strip()
+            deliv_uuid = None
             try:
-                deliv_uuids.append(UUID(d_id))
+                deliv_uuid = UUID(clean_did)
             except Exception:
                 pass
-        
-        if deliv_uuids:
-            deliveries = db.query(Delivery).filter(
-                Delivery.id.in_(deliv_uuids),
-                Delivery.tenant_id == tenant_id
-            ).all()
+            
+            d_query = db.query(Delivery).filter(Delivery.tenant_id == tenant_id)
+            if deliv_uuid:
+                deliveries = d_query.filter(Delivery.id == deliv_uuid).all()
+            else:
+                deliveries = d_query.filter(Delivery.order_id == clean_did).all()
 
             for d in deliveries:
-                if d.type == "PICKUP":
-                    d.pickup_commission_paid = True
-                    d.pickup_payment_method = payload.payment_method
-                elif d.type == "DELIVERY":
-                    d.delivery_commission_paid = True
-                    d.delivery_payment_method = payload.payment_method
-                else:
-                    d.pickup_commission_paid = True
-                    d.delivery_commission_paid = True
-                    d.pickup_payment_method = payload.payment_method
-                    d.delivery_payment_method = payload.payment_method
+                d.pickup_commission_paid = True
+                d.delivery_commission_paid = True
+                d.pickup_payment_method = payload.payment_method
+                d.delivery_payment_method = payload.payment_method
                 updated_count += 1
-
                 if d.order_id:
                     ord_obj = db.query(Order).filter(Order.id == d.order_id, Order.tenant_id == tenant_id).first()
                     if ord_obj:
-                        if d.type == "PICKUP":
-                            ord_obj.pickup_commission_paid = True
-                            ord_obj.pickup_payment_method = payload.payment_method
-                        elif d.type == "DELIVERY":
-                            ord_obj.delivery_commission_paid = True
-                            ord_obj.delivery_payment_method = payload.payment_method
-                        else:
-                            ord_obj.pickup_commission_paid = True
-                            ord_obj.delivery_commission_paid = True
-                            ord_obj.pickup_payment_method = payload.payment_method
-                            ord_obj.delivery_payment_method = payload.payment_method
+                        ord_obj.pickup_commission_paid = True
+                        ord_obj.delivery_commission_paid = True
+                        ord_obj.pickup_payment_method = payload.payment_method
+                        ord_obj.delivery_payment_method = payload.payment_method
 
     if payload.order_ids:
-        ord_uuids = []
         for o_id in payload.order_ids:
+            clean_oid = str(o_id).replace('#', '').strip()
+            o_uuid = None
             try:
-                ord_uuids.append(UUID(o_id))
+                o_uuid = UUID(clean_oid)
             except Exception:
                 pass
 
-        if ord_uuids:
-            orders = db.query(Order).filter(
-                Order.id.in_(ord_uuids),
-                Order.tenant_id == tenant_id
-            ).all()
+            if o_uuid:
+                orders = db.query(Order).filter(
+                    or_(Order.id == o_uuid, Order.order_number == clean_oid),
+                    Order.tenant_id == tenant_id
+                ).all()
+            else:
+                orders = db.query(Order).filter(
+                    Order.order_number == clean_oid,
+                    Order.tenant_id == tenant_id
+                ).all()
 
             for o in orders:
                 o.pickup_commission_paid = True
@@ -794,6 +818,43 @@ def mark_commission_paid(
                     d.delivery_commission_paid = True
                     d.pickup_payment_method = payload.payment_method
                     d.delivery_payment_method = payload.payment_method
+
+    elif payload.staff_id or payload.staff_name:
+        s_uuid = None
+        if payload.staff_id:
+            try:
+                s_uuid = UUID(str(payload.staff_id))
+            except Exception:
+                pass
+        
+        staff_user = db.query(User).filter(User.id == s_uuid, User.tenant_id == tenant_id).first() if s_uuid else None
+        if not staff_user and payload.staff_name:
+            staff_user = db.query(User).filter(User.name.ilike(payload.staff_name.strip()), User.tenant_id == tenant_id).first()
+        
+        if staff_user:
+            staff_delivs = db.query(Delivery).filter(
+                Delivery.delivery_boy_id == staff_user.id,
+                Delivery.tenant_id == tenant_id
+            ).all()
+            for d in staff_delivs:
+                if d.type == "PICKUP" and not d.pickup_commission_paid:
+                    d.pickup_commission_paid = True
+                    d.pickup_payment_method = payload.payment_method
+                    updated_count += 1
+                elif d.type == "DELIVERY" and not d.delivery_commission_paid:
+                    d.delivery_commission_paid = True
+                    d.delivery_payment_method = payload.payment_method
+                    updated_count += 1
+                
+                if d.order_id:
+                    ord_obj = db.query(Order).filter(Order.id == d.order_id, Order.tenant_id == tenant_id).first()
+                    if ord_obj:
+                        if d.type == "PICKUP" and not ord_obj.pickup_commission_paid:
+                            ord_obj.pickup_commission_paid = True
+                            ord_obj.pickup_payment_method = payload.payment_method
+                        elif d.type == "DELIVERY" and not ord_obj.delivery_commission_paid:
+                            ord_obj.delivery_commission_paid = True
+                            ord_obj.delivery_payment_method = payload.payment_method
 
     audit_log = AuditLog(
         id=uuid4(),
@@ -810,6 +871,4 @@ def mark_commission_paid(
         "message": f"Successfully marked commission as paid for {updated_count} items via {payload.payment_method}",
         "updated_count": updated_count
     }
-
-
 

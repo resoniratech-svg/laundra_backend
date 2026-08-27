@@ -92,10 +92,10 @@ def get_current_super_admin(current_user: User = Depends(get_current_user)) -> U
     return current_user
 
 def get_current_admin_or_cashier(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role not in ["ADMIN", "CASHIER", "SUPER_ADMIN", "CUSTOMER"]:
+    if current_user.role not in ["ADMIN", "CASHIER", "SUPER_ADMIN", "CUSTOMER", "DELIVERY_BOY"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="The user does not have enough privileges. Must be Admin or Cashier."
+            detail="The user does not have enough privileges."
         )
     return current_user
 
