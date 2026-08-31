@@ -55,15 +55,51 @@ def create_order(
     )
     if order_in.payment_method:
         setattr(order, 'payment_method', order_in.payment_method)
-    if current_admin.role == "DELIVERY_BOY":
-        order.pickup_staff_id = current_admin.id
-        order.pickup_courier = current_admin.name
+
+    staff_uuid = None
+    if order_in.pickup_staff_id:
+        try:
+            staff_uuid = UUID(str(order_in.pickup_staff_id))
+        except Exception:
+            pass
+    elif current_admin.role == "DELIVERY_BOY":
+        staff_uuid = current_admin.id
+
+    if staff_uuid:
+        from app.models.delivery import Delivery
+        order.pickup_staff_id = staff_uuid
+        staff_user = db.query(User).filter(User.id == staff_uuid).first()
+        if staff_user:
+            order.pickup_courier = staff_user.name
         order.status = "Fully Picked Up"
-        order.special_instructions = f"Field Order created by Delivery Agent {current_admin.name}"
+        if not order.special_instructions:
+            order.special_instructions = f"Field Order created by Delivery Agent {staff_user.name if staff_user else ''}"
         for it in order.items:
             it.picked_up_quantity = it.ordered_quantity or it.quantity
             it.pickup_pending_quantity = 0
             it.item_status = "FULLY_PICKED_UP"
+
+        existing_deliv = db.query(Delivery).filter(
+            Delivery.order_id == order.id,
+            Delivery.type == "PICKUP",
+            Delivery.tenant_id == current_admin.tenant_id
+        ).first()
+        if not existing_deliv:
+            deliv = Delivery(
+                id=uuid4(),
+                order_id=order.id,
+                delivery_boy_id=staff_uuid,
+                type="PICKUP",
+                status="PICKED",
+                tenant_id=current_admin.tenant_id,
+                pickup_commission=order.pickup_commission or Decimal("0.0"),
+                delivery_commission=Decimal("0.0"),
+                pickup_commission_paid=False,
+                delivery_commission_paid=False,
+                pickup_payment_method=getattr(order, 'pickup_payment_method', None) or getattr(order, 'payment_method', None) or "CASH"
+            )
+            db.add(deliv)
+
         db.commit()
         db.refresh(order)
 

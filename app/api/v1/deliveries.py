@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Any
 from uuid import UUID
+from decimal import Decimal
 from pydantic import BaseModel
 from datetime import datetime
 from sqlalchemy import func
@@ -86,9 +87,48 @@ def list_deliveries(
     db: Session = Depends(get_db)
 ):
     from app.models.delivery import Delivery
+    from app.models.order import Order
     from sqlalchemy import or_
+    from uuid import uuid4
+    from decimal import Decimal
     tenant_id = current_user.tenant_id
+
     if current_user.role == "DELIVERY_BOY":
+        # Auto-link any field orders created by this delivery boy
+        field_orders = db.query(Order).filter(
+            Order.tenant_id == tenant_id,
+            or_(
+                Order.pickup_staff_id == current_user.id,
+                Order.delivery_staff_id == current_user.id,
+                Order.special_instructions.ilike(f"%{current_user.name.strip()}%")
+            )
+        ).all()
+        for fo in field_orders:
+            has_deliv = db.query(Delivery).filter(
+                Delivery.order_id == fo.id,
+                Delivery.type == "PICKUP",
+                Delivery.tenant_id == tenant_id
+            ).first()
+            if not has_deliv:
+                new_d = Delivery(
+                    id=uuid4(),
+                    order_id=fo.id,
+                    delivery_boy_id=current_user.id,
+                    type="PICKUP",
+                    status="PICKED",
+                    tenant_id=tenant_id,
+                    pickup_commission=fo.pickup_commission or Decimal("0.0"),
+                    delivery_commission=Decimal("0.0"),
+                    pickup_commission_paid=fo.pickup_commission_paid or False,
+                    delivery_commission_paid=False,
+                    pickup_payment_method=getattr(fo, 'pickup_payment_method', None) or getattr(fo, 'payment_method', None) or "CASH"
+                )
+                db.add(new_d)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
         all_delivs = db.query(Delivery).filter(
             or_(
                 Delivery.delivery_boy_id == current_user.id,
@@ -667,7 +707,10 @@ def get_delivery_task_details(
             "pickup_commission_paid": bool(order.pickup_commission_paid or delivery.pickup_commission_paid) if order else bool(delivery.pickup_commission_paid),
             "delivery_commission_paid": bool(order.delivery_commission_paid or delivery.delivery_commission_paid) if order else bool(delivery.delivery_commission_paid),
             "pickup_payment_method": getattr(order, 'pickup_payment_method', None) or getattr(order, 'payment_method', None) or getattr(delivery, 'pickup_payment_method', None) or "CASH",
-            "delivery_payment_method": getattr(order, 'delivery_payment_method', None) or getattr(delivery, 'delivery_payment_method', None) or "CASH",
+            "handover_settled": bool(getattr(order, 'handover_settled', False)),
+            "handover_settled_at": getattr(order, 'handover_settled_at', None),
+            "handover_settled_by": getattr(order, 'handover_settled_by', None),
+            "handover_settlement_id": getattr(order, 'handover_settlement_id', None),
             "pickup_address": order.pickup_address if order else "N/A",
             "delivery_address": order.delivery_address if order else "N/A",
             "pickup_date": order.pickup_date if order else None,
@@ -871,4 +914,160 @@ def mark_commission_paid(
         "message": f"Successfully marked commission as paid for {updated_count} items via {payload.payment_method}",
         "updated_count": updated_count
     }
+
+class DriverSettlementCreate(BaseModel):
+    settlement_number: Optional[str] = None
+    driver_id: Optional[str] = None
+    driver_name: Optional[str] = None
+    settled_at: Optional[str] = None
+    cash_amount: Optional[Decimal] = Decimal('0.0')
+    card_amount: Optional[Decimal] = Decimal('0.0')
+    cheque_amount: Optional[Decimal] = Decimal('0.0')
+    total_amount: Optional[Decimal] = Decimal('0.0')
+    order_count: Optional[int] = 0
+    orders: Optional[Any] = None
+    notes: Optional[str] = None
+
+@router.get("/settlements")
+def list_driver_settlements(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    from app.models.driver_settlement import DriverSettlement
+    from datetime import datetime
+    tenant_id = current_user.tenant_id
+
+    query = db.query(DriverSettlement).filter(DriverSettlement.tenant_id == tenant_id)
+    if current_user.role == "DELIVERY_BOY":
+        from sqlalchemy import or_
+        query = query.filter(
+            or_(
+                DriverSettlement.driver_id == current_user.id,
+                DriverSettlement.driver_name.ilike(f"%{current_user.name.strip()}%")
+            )
+        )
+    settlements = query.order_by(DriverSettlement.settled_at.desc()).all()
+    
+    return [
+        {
+            "id": str(s.id),
+            "settlementNumber": s.settlement_number or f"ST-{str(s.id)[:6]}",
+            "driverId": str(s.driver_id) if s.driver_id else "",
+            "driverName": s.driver_name or "Driver",
+            "settledBy": s.settled_by or "Store Admin",
+            "settledAt": (s.settled_at.strftime('%Y-%m-%dT%H:%M:%SZ') if s.settled_at else datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')),
+            "cashAmount": float(s.cash_amount or 0.0),
+            "cardAmount": float(s.card_amount or 0.0),
+            "chequeAmount": float(s.cheque_amount or 0.0),
+            "onlineAmount": 0.0,
+            "totalAmount": float(s.total_amount or 0.0),
+            "orderCount": s.order_count or 0,
+            "orders": s.orders or [],
+            "notes": s.notes or "",
+            "status": s.status or "SETTLED"
+        }
+        for s in settlements
+    ]
+
+@router.post("/settlements")
+def create_driver_settlement(
+    payload: DriverSettlementCreate,
+    current_user: User = Depends(get_current_admin_or_cashier),
+    db: Session = Depends(get_db)
+):
+    from app.models.driver_settlement import DriverSettlement
+    from app.models.order import Order
+    from datetime import datetime
+    from uuid import uuid4, UUID
+    import random
+    tenant_id = current_user.tenant_id
+
+    s_id = uuid4()
+    settle_num = payload.settlement_number or f"#ST-{random.randint(100000, 999999)}"
+    driver_uuid = None
+    if payload.driver_id:
+        try:
+            driver_uuid = UUID(str(payload.driver_id))
+        except Exception:
+            pass
+
+    now = datetime.utcnow()
+    if payload.settled_at:
+        try:
+            clean_ts = payload.settled_at.replace('Z', '+00:00')
+            now = datetime.fromisoformat(clean_ts)
+        except Exception:
+            pass
+
+    if not tenant_id and payload.driver_name:
+        d_usr = db.query(User).filter(User.name.ilike(f"%{payload.driver_name.strip()}%")).first()
+        if d_usr and d_usr.tenant_id:
+            tenant_id = d_usr.tenant_id
+
+    new_settlement = DriverSettlement(
+        id=s_id,
+        tenant_id=tenant_id,
+        settlement_number=settle_num,
+        driver_id=driver_uuid,
+        driver_name=payload.driver_name or "Driver",
+        settled_by=current_user.name or "Store Admin",
+        settled_at=now,
+        cash_amount=payload.cash_amount or Decimal('0.0'),
+        card_amount=payload.card_amount or Decimal('0.0'),
+        cheque_amount=payload.cheque_amount or Decimal('0.0'),
+        total_amount=payload.total_amount or Decimal('0.0'),
+        order_count=payload.order_count or (len(payload.orders) if isinstance(payload.orders, list) else 0),
+        orders=payload.orders,
+        notes=payload.notes,
+        status="SETTLED"
+    )
+    db.add(new_settlement)
+
+    # Mark all associated orders as handover settled
+    if isinstance(payload.orders, list):
+        for o_item in payload.orders:
+            o_id_str = str(o_item.get("orderId") or o_item.get("id") or "")
+            if not o_id_str:
+                continue
+            
+            ord_obj = None
+            try:
+                ord_uuid = UUID(o_id_str)
+                ord_obj = db.query(Order).filter(Order.id == ord_uuid).first()
+            except Exception:
+                pass
+            
+            if not ord_obj:
+                ord_obj = db.query(Order).filter(Order.order_number == o_id_str).first()
+
+            if ord_obj:
+                if not new_settlement.tenant_id and ord_obj.tenant_id:
+                    new_settlement.tenant_id = ord_obj.tenant_id
+                ord_obj.handover_settled = True
+                ord_obj.handover_settled_at = now
+                ord_obj.handover_settled_by = current_user.name or "Store Admin"
+                ord_obj.handover_settlement_id = settle_num
+
+    db.commit()
+    db.refresh(new_settlement)
+
+    return {
+        "success": True,
+        "message": f"Successfully created settlement voucher {settle_num}",
+        "settlement": {
+            "id": str(new_settlement.id),
+            "settlementNumber": new_settlement.settlement_number,
+            "driverName": new_settlement.driver_name,
+            "settledBy": new_settlement.settled_by,
+            "settledAt": new_settlement.settled_at.isoformat() if new_settlement.settled_at else now.isoformat(),
+            "cashAmount": float(new_settlement.cash_amount or 0.0),
+            "cardAmount": float(new_settlement.card_amount or 0.0),
+            "chequeAmount": float(new_settlement.cheque_amount or 0.0),
+            "totalAmount": float(new_settlement.total_amount or 0.0),
+            "orderCount": new_settlement.order_count or 0,
+            "orders": new_settlement.orders or [],
+            "status": "SETTLED"
+        }
+    }
+
 

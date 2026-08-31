@@ -43,6 +43,8 @@ class OrderCreate(OrderBase):
     payment_method: Optional[str] = None
     paid_amount: Optional[Decimal] = None
     order_number: Optional[str] = None
+    pickup_staff_id: Optional[Union[UUID, str]] = None
+    delivery_staff_id: Optional[Union[UUID, str]] = None
 
 class OrderOut(OrderBase):
     id: UUID

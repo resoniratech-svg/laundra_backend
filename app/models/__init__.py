@@ -48,6 +48,7 @@ from app.models.prepaid_package import PrepaidPackage
 from app.models.customer_package import CustomerPackage
 from app.models.package_usage_history import PackageUsageHistory
 from app.models.wallet_pass import WalletPass
+from app.models.driver_settlement import DriverSettlement
 
 # This ensures all models are registered with SQLAlchemy Base
 
@@ -79,5 +80,6 @@ __all__ = [
     "PrepaidPackage",
     "CustomerPackage",
     "PackageUsageHistory",
-    "WalletPass"
+    "WalletPass",
+    "DriverSettlement"
 ]

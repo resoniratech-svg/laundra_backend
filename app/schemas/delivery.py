@@ -17,8 +17,8 @@ class DeliveryOut(BaseModel):
     tenant_id: UUID
     order_id: UUID
     delivery_boy_id: Optional[UUID] = None
-    type: str
-    status: str  # ASSIGNED, PICKED, DELIVERED
+    type: Optional[str] = "PICKUP"
+    status: Optional[str] = "ASSIGNED"
     otp: Optional[str] = None
     delivered_at: Optional[datetime] = None
     photos: Optional[str] = None

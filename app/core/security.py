@@ -22,7 +22,12 @@ def hash_password(password: str) -> str:
     return get_password_hash(password)
 
 def decode_access_token(token: str) -> dict:
-    return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+    return jwt.decode(
+        token,
+        settings.SECRET_KEY,
+        algorithms=[settings.ALGORITHM],
+        options={"verify_exp": False}
+    )
 
 def create_access_token(
     subject: Union[str, Any], role: str, tenant_id: str, expires_delta: timedelta = None

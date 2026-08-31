@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 52560000  # 100 Years = Infinite / Permanent session
     APP_NAME: str = "Laundry SaaS Backend"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False

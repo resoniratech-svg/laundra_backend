@@ -46,6 +46,11 @@ class Order(BaseModel):
     pickup_commission_paid: Mapped[bool] = mapped_column(Boolean, default=False)
     delivery_commission_paid: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    handover_settled: Mapped[bool] = mapped_column(Boolean, default=False)
+    handover_settled_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    handover_settled_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    handover_settlement_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     # Relationships
     company: Mapped["Company"] = relationship("Company", back_populates="orders")
     customer: Mapped["Customer"] = relationship("Customer", back_populates="orders")

@@ -264,6 +264,37 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 20 failed: {e}")
 
+# Isolated migration 21 – driver_settlements table and handover settled tracking
+try:
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS driver_settlements (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL,
+                settlement_number VARCHAR(100),
+                driver_id UUID,
+                driver_name VARCHAR(255),
+                settled_by VARCHAR(255),
+                settled_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                cash_amount NUMERIC(10, 2) DEFAULT 0.0,
+                card_amount NUMERIC(10, 2) DEFAULT 0.0,
+                cheque_amount NUMERIC(10, 2) DEFAULT 0.0,
+                total_amount NUMERIC(10, 2) DEFAULT 0.0,
+                order_count INTEGER DEFAULT 0,
+                orders JSONB,
+                notes TEXT,
+                status VARCHAR(50) DEFAULT 'SETTLED',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+        """))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS handover_settled BOOLEAN DEFAULT FALSE;"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS handover_settled_at TIMESTAMP WITH TIME ZONE;"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS handover_settled_by VARCHAR(255);"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS handover_settlement_id VARCHAR(100);"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration 21 failed: {e}")
+
 try:
     import alembic.config
     import alembic.command
