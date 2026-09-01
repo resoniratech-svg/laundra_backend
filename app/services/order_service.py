@@ -38,6 +38,8 @@ class OrderService:
         payment_status: str = None,
         payment_method: str = None,
         paid_amount: Decimal = None,
+        total_amount: Decimal = None,
+        discount: Decimal = None,
         order_number: str = None
     ) -> Order:
         if not tenant_id:
@@ -110,7 +112,7 @@ class OrderService:
                 return existing_order
 
         # 2. Process order items & calculate total amount
-        total_amount = Decimal("0.0")
+        calculated_total = Decimal("0.0")
         items_to_create = []
         
         for item in items_in:
@@ -142,9 +144,13 @@ class OrderService:
                 db.commit()
                 db.refresh(service)
             
-            price = service.express_price if (is_express and service.express_price is not None) else service.price
+            # Use explicit item price if provided by POS/caller, else fallback to service master price
+            if getattr(item, 'price', None) is not None:
+                price = Decimal(str(item.price))
+            else:
+                price = service.express_price if (is_express and service.express_price is not None) else service.price
             item_total = price * item.quantity
-            total_amount += item_total
+            calculated_total += item_total
             
             order_item = OrderItem(
                 id=uuid4(),
@@ -160,8 +166,8 @@ class OrderService:
             )
             items_to_create.append(order_item)
 
-        # 3. Handle Coupon
-        discount = Decimal("0.0")
+        # 3. Handle Coupon & Discount
+        calculated_discount = Decimal("0.0")
         if coupon_code:
             coupon = db.query(Coupon).filter(
                 Coupon.code == coupon_code,
@@ -182,16 +188,22 @@ class OrderService:
                 )
             
             if coupon.discount_type == "PERCENTAGE":
-                discount = total_amount * (coupon.value / Decimal("100.0"))
+                calculated_discount = calculated_total * (coupon.value / Decimal("100.0"))
             elif coupon.discount_type == "FLAT":
-                discount = coupon.value
+                calculated_discount = coupon.value
             
             # Ensure discount doesn't exceed total amount
-            discount = min(discount, total_amount)
+            calculated_discount = min(calculated_discount, calculated_total)
 
-        final_amount = total_amount - discount
+        # 4. Determine Final Total Amount
+        if total_amount is not None:
+            final_amount = Decimal(str(total_amount))
+            final_discount = Decimal(str(discount)) if discount is not None else calculated_discount
+        else:
+            final_discount = calculated_discount
+            final_amount = max(Decimal("0.0"), calculated_total - final_discount)
 
-        # 4. Create Order
+        # 5. Create Order
         order_id = uuid4()
         
         # Calculate initial payment status & paid amount
@@ -212,7 +224,7 @@ class OrderService:
             order_number=str(order_number) if order_number else OrderService.generate_order_number(),
             status="CREATED",
             total_amount=final_amount,
-            discount=discount,
+            discount=final_discount,
             paid_amount=computed_paid_amount,
             payment_status=computed_payment_status,
             payment_method=payment_method or "CASH",

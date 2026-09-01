@@ -9,7 +9,8 @@ class OrderItemBase(BaseModel):
     quantity: int
 
 class OrderItemCreate(OrderItemBase):
-    pass
+    price: Optional[Decimal] = None
+    service_name: Optional[str] = None
 
 class OrderItemOut(OrderItemBase):
     id: UUID
@@ -42,6 +43,8 @@ class OrderCreate(OrderBase):
     payment_status: Optional[str] = None
     payment_method: Optional[str] = None
     paid_amount: Optional[Decimal] = None
+    total_amount: Optional[Decimal] = None
+    discount: Optional[Decimal] = None
     order_number: Optional[str] = None
     pickup_staff_id: Optional[Union[UUID, str]] = None
     delivery_staff_id: Optional[Union[UUID, str]] = None

@@ -10,7 +10,7 @@ from app.dependencies import get_current_user, get_current_admin, get_current_ad
 from app.models.user import User
 from app.models.order import Order
 from app.models.order_item import OrderItem
-from app.schemas.order import OrderCreate, OrderOut, OrderItemOut, OrderReviewPayload, ReviewReplyPayload, ReviewVisibilityPayload
+from app.schemas.order import OrderCreate, OrderOut, OrderItemOut, OrderItemCreate, OrderReviewPayload, ReviewReplyPayload, ReviewVisibilityPayload
 from app.services.order_service import OrderService
 from app.repositories.order_repository import OrderRepository
 
@@ -51,6 +51,8 @@ def create_order(
         payment_status=order_in.payment_status,
         payment_method=order_in.payment_method,
         paid_amount=order_in.paid_amount,
+        total_amount=order_in.total_amount,
+        discount=order_in.discount,
         order_number=order_in.order_number
     )
     if order_in.payment_method:
@@ -326,8 +328,10 @@ def update_order_status(
 class OrderUpdate(BaseModel):
     status: Optional[str] = None
     discount: Optional[Decimal] = None
+    total_amount: Optional[Decimal] = None
     paid_amount: Optional[Decimal] = None
     payment_status: Optional[str] = None
+    items: Optional[List[OrderItemCreate]] = None
 
 @router.put("/{id}", response_model=OrderOut)
 def update_order(
@@ -336,6 +340,7 @@ def update_order(
     current_admin: User = Depends(get_current_admin_or_cashier),
     db: Session = Depends(get_db)
 ):
+    from uuid import uuid4, UUID as PyUUID
     order = order_repo.get(db, id, tenant_id=current_admin.tenant_id)
     if not order:
         raise HTTPException(
@@ -343,7 +348,36 @@ def update_order(
             detail="Order not found"
         )
     update_data = payload.model_dump(exclude_unset=True)
+    items_in = update_data.pop("items", None)
     updated_order = order_repo.update(db, db_obj=order, obj_in=update_data)
+
+    if items_in is not None and len(items_in) > 0:
+        db.query(OrderItem).filter(OrderItem.order_id == updated_order.id).delete()
+        for item_data in items_in:
+            srv_id = item_data.get("service_id") if isinstance(item_data, dict) else getattr(item_data, "service_id", None)
+            qty = (item_data.get("quantity") if isinstance(item_data, dict) else getattr(item_data, "quantity", 1)) or 1
+            item_price = (item_data.get("price") if isinstance(item_data, dict) else getattr(item_data, "price", Decimal("0.0"))) or Decimal("0.0")
+            try:
+                srv_uuid = PyUUID(str(srv_id))
+            except Exception:
+                srv_uuid = None
+            
+            new_item = OrderItem(
+                id=uuid4(),
+                order_id=updated_order.id,
+                service_id=srv_uuid or updated_order.id,
+                quantity=qty,
+                price=Decimal(str(item_price)),
+                ordered_quantity=qty,
+                picked_up_quantity=0,
+                pickup_pending_quantity=qty,
+                delivered_quantity=0,
+                delivery_pending_quantity=0,
+                item_status="CREATED"
+            )
+            db.add(new_item)
+        db.commit()
+
     updated_order.items = db.query(OrderItem).filter(OrderItem.order_id == updated_order.id).all()
     return updated_order
 
