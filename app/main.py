@@ -107,6 +107,13 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 9 failed: {e}")
 
+# Isolated migration – expenses attachment field
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS attachment TEXT;"))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration for expenses.attachment failed: {e}")
+
 # Isolated migration 10 – fix orphaned customers (create missing User records)
 try:
     with engine.begin() as conn:

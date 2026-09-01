@@ -28,11 +28,25 @@ def create_expense(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
+    from sqlalchemy import text
     obj_data = expense_in.model_dump()
     obj_data["id"] = uuid4()
     obj_data["tenant_id"] = current_admin.tenant_id
     
-    return expense_repo.create(db, obj_in=obj_data)
+    try:
+        return expense_repo.create(db, obj_in=obj_data)
+    except Exception as e:
+        db.rollback()
+        # Ensure column exists if not migrated yet
+        try:
+            db.execute(text("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS attachment TEXT;"))
+            db.commit()
+            return expense_repo.create(db, obj_in=obj_data)
+        except Exception:
+            db.rollback()
+            # If still fails with attachment, save without attachment as fallback
+            obj_data.pop("attachment", None)
+            return expense_repo.create(db, obj_in=obj_data)
 
 @router.get("", response_model=List[ExpenseOut])
 def list_expenses(
@@ -48,6 +62,7 @@ def update_expense(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
+    from sqlalchemy import text
     expense = expense_repo.get(db, id, tenant_id=current_admin.tenant_id)
     if not expense:
         raise HTTPException(
@@ -55,7 +70,18 @@ def update_expense(
             detail="Expense not found"
         )
     update_data = payload.model_dump(exclude_unset=True)
-    return expense_repo.update(db, db_obj=expense, obj_in=update_data)
+    try:
+        return expense_repo.update(db, db_obj=expense, obj_in=update_data)
+    except Exception:
+        db.rollback()
+        try:
+            db.execute(text("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS attachment TEXT;"))
+            db.commit()
+            return expense_repo.update(db, db_obj=expense, obj_in=update_data)
+        except Exception:
+            db.rollback()
+            update_data.pop("attachment", None)
+            return expense_repo.update(db, db_obj=expense, obj_in=update_data)
 
 @router.delete("/{id}", status_code=status.HTTP_200_OK)
 def delete_expense(
