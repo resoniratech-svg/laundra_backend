@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, String, Numeric
+from sqlalchemy import ForeignKey, String, Numeric, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import BaseModel
@@ -14,6 +14,7 @@ class Expense(BaseModel):
     category: Mapped[Optional[str]] = mapped_column(String(100))
     source: Mapped[Optional[str]] = mapped_column(String(100))
     date: Mapped[Optional[str]] = mapped_column(String(50))
+    attachment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
     company: Mapped["Company"] = relationship("Company", back_populates="expenses")

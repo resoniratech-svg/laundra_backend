@@ -145,8 +145,9 @@ class OrderService:
                 db.refresh(service)
             
             # Use explicit item price if provided by POS/caller, else fallback to service master price
-            if getattr(item, 'price', None) is not None:
-                price = Decimal(str(item.price))
+            item_price = getattr(item, 'price', None) if getattr(item, 'price', None) is not None else getattr(item, 'unit_price', None)
+            if item_price is not None:
+                price = Decimal(str(item_price))
             else:
                 price = service.express_price if (is_express and service.express_price is not None) else service.price
             item_total = price * item.quantity

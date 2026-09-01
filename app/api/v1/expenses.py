@@ -20,6 +20,7 @@ class ExpenseUpdate(BaseModel):
     category: Optional[str] = None
     source: Optional[str] = None
     date: Optional[str] = None
+    attachment: Optional[str] = None
 
 @router.post("", response_model=ExpenseOut, status_code=status.HTTP_201_CREATED)
 def create_expense(

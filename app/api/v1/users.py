@@ -130,10 +130,15 @@ def delete_user(
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
+    from sqlalchemy import text
     from app.models.company import Company
     from app.core.email_service import send_rejection_email
     
     user = user_repo.get(db, user_id, tenant_id=current_admin.tenant_id)
+    if not user:
+        # Fallback to general lookup by ID
+        user = db.query(User).filter(User.id == user_id).first()
+        
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -142,32 +147,49 @@ def delete_user(
         
     # Send rejection email if user is pending
     if user.status == "PENDING_APPROVAL" and user.role == "DELIVERY_BOY":
-        company = db.query(Company).filter(Company.id == user.tenant_id).first()
-        company_name = company.name if company else "our Laundry Platform"
-        send_rejection_email(db, user.email, company_name)
+        try:
+            company = db.query(Company).filter(Company.id == user.tenant_id).first()
+            company_name = company.name if company else "our Laundry Platform"
+            send_rejection_email(db, user.email, company_name)
+        except Exception:
+            pass
         
-    # Delete or unassign child records referencing this user
-    from app.models.leave_request import LeaveRequest
-    from app.models.attendance import Attendance
-    from app.models.delivery import Delivery
-    from app.models.payment import Payment
-    from app.models.notification import Notification
-    from app.models.support_ticket import SupportTicket
-    from app.models.customer_support_ticket import CustomerSupportTicket
+    uid = str(user_id)
+    try:
+        # 1. Unlink staff assignments from orders
+        db.execute(text("UPDATE orders SET pickup_staff_id = NULL WHERE pickup_staff_id = :uid"), {"uid": uid})
+        db.execute(text("UPDATE orders SET delivery_staff_id = NULL WHERE delivery_staff_id = :uid"), {"uid": uid})
+        
+        # 2. Unlink or remove driver settlement records
+        db.execute(text("UPDATE driver_settlements SET driver_id = NULL WHERE driver_id = :uid"), {"uid": uid})
+        
+        # 3. Unlink deliveries and payments
+        db.execute(text("UPDATE deliveries SET delivery_boy_id = NULL WHERE delivery_boy_id = :uid"), {"uid": uid})
+        db.execute(text("UPDATE payments SET delivery_boy_id = NULL WHERE delivery_boy_id = :uid"), {"uid": uid})
+        
+        # 4. Delete user-specific logs, requests, tickets, attendance, passes, packages
+        db.execute(text("DELETE FROM leave_requests WHERE user_id = :uid"), {"uid": uid})
+        db.execute(text("DELETE FROM attendance WHERE user_id = :uid"), {"uid": uid})
+        db.execute(text("DELETE FROM notifications WHERE user_id = :uid"), {"uid": uid})
+        db.execute(text("DELETE FROM support_tickets WHERE user_id = :uid"), {"uid": uid})
+        db.execute(text("DELETE FROM customer_support_tickets WHERE user_id = :uid"), {"uid": uid})
+        db.execute(text("DELETE FROM wallet_passes WHERE customer_id = :uid"), {"uid": uid})
+        db.execute(text("DELETE FROM customer_packages WHERE customer_id = :uid"), {"uid": uid})
+        db.execute(text("DELETE FROM audit_logs WHERE user_id = :uid"), {"uid": uid})
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[WARN] Error unlinking child records for user {user_id}: {e}")
 
     try:
-        db.query(LeaveRequest).filter(LeaveRequest.user_id == user_id).delete(synchronize_session=False)
-        db.query(Attendance).filter(Attendance.user_id == user_id).delete(synchronize_session=False)
-        db.query(Notification).filter(Notification.user_id == user_id).delete(synchronize_session=False)
-        db.query(SupportTicket).filter(SupportTicket.user_id == user_id).delete(synchronize_session=False)
-        db.query(CustomerSupportTicket).filter(CustomerSupportTicket.user_id == user_id).delete(synchronize_session=False)
-        db.query(Delivery).filter(Delivery.delivery_boy_id == user_id).delete(synchronize_session=False)
-        db.query(Payment).filter(Payment.delivery_boy_id == user_id).delete(synchronize_session=False)
+        db.delete(user)
+        db.commit()
     except Exception as e:
-        print(f"[WARN] Error during child record cascade delete for user {user_id}: {e}")
+        db.rollback()
+        # Fallback to direct text execution
+        db.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": uid})
+        db.commit()
 
-    db.delete(user)
-    db.commit()
     return {"success": True, "message": "User permanently deleted"}
 
 @router.patch("/{user_id}/status", response_model=UserOut)
@@ -328,32 +350,5 @@ def reject_delivery_boy(
     db.commit()
     db.refresh(user)
     return user
-
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user(
-    user_id: UUID,
-    current_admin: User = Depends(get_current_admin),
-    db: Session = Depends(get_db)
-):
-    from sqlalchemy import text
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    uid = str(user_id)
-    try:
-        db.execute(text("DELETE FROM wallet_passes WHERE customer_id = :uid"), {"uid": uid})
-        db.execute(text("DELETE FROM customer_packages WHERE customer_id = :uid"), {"uid": uid})
-        db.execute(text("UPDATE deliveries SET delivery_boy_id = NULL WHERE delivery_boy_id = :uid"), {"uid": uid})
-        db.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": uid})
-        db.commit()
-    except Exception:
-        db.rollback()
-        db.delete(user)
-        db.commit()
-    return None
 
 

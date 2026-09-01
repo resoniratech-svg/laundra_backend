@@ -10,6 +10,7 @@ class ExpenseBase(BaseModel):
     category: Optional[str] = None
     source: Optional[str] = None
     date: Optional[str] = None
+    attachment: Optional[str] = None
 
 class ExpenseCreate(ExpenseBase):
     description: str

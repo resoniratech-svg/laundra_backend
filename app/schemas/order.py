@@ -10,6 +10,7 @@ class OrderItemBase(BaseModel):
 
 class OrderItemCreate(OrderItemBase):
     price: Optional[Decimal] = None
+    unit_price: Optional[Decimal] = None
     service_name: Optional[str] = None
 
 class OrderItemOut(OrderItemBase):
