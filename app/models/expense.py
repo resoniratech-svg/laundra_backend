@@ -9,10 +9,10 @@ class Expense(BaseModel):
     __tablename__ = "expenses"
 
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey("companies.id"), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(String(255))
+    description: Mapped[Optional[str]] = mapped_column(Text)
     amount: Mapped[Decimal] = mapped_column(Numeric)
-    category: Mapped[Optional[str]] = mapped_column(String(100))
-    source: Mapped[Optional[str]] = mapped_column(String(100))
+    category: Mapped[Optional[str]] = mapped_column(Text)
+    source: Mapped[Optional[str]] = mapped_column(Text)
     date: Mapped[Optional[str]] = mapped_column(String(50))
     attachment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

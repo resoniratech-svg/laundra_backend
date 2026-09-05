@@ -107,12 +107,43 @@ try:
 except Exception as e:
     print(f"[STARTUP WARNING] Migration 9 failed: {e}")
 
-# Isolated migration – expenses attachment field
+# Isolated migration – expenses fields and attachment
 try:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS attachment TEXT;"))
+        conn.execute(text("ALTER TABLE expenses ALTER COLUMN description TYPE TEXT;"))
+        conn.execute(text("ALTER TABLE expenses ALTER COLUMN category TYPE TEXT;"))
+        conn.execute(text("ALTER TABLE expenses ALTER COLUMN source TYPE TEXT;"))
 except Exception as e:
-    print(f"[STARTUP WARNING] Migration for expenses.attachment failed: {e}")
+    print(f"[STARTUP WARNING] Migration for expenses text columns failed: {e}")
+
+# Isolated migration – cashier_shifts table
+try:
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS cashier_shifts (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                cashier_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                cashier_name VARCHAR(150) NOT NULL DEFAULT 'Cashier',
+                start_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                end_time TIMESTAMP,
+                opening_cash NUMERIC(12, 2) NOT NULL DEFAULT 0,
+                closing_cash NUMERIC(12, 2),
+                expected_cash NUMERIC(12, 2),
+                difference NUMERIC(12, 2),
+                cash_sales NUMERIC(12, 2) NOT NULL DEFAULT 0,
+                card_sales NUMERIC(12, 2) NOT NULL DEFAULT 0,
+                driver_handovers NUMERIC(12, 2) NOT NULL DEFAULT 0,
+                cash_expenses NUMERIC(12, 2) NOT NULL DEFAULT 0,
+                status VARCHAR(20) NOT NULL DEFAULT 'OPEN',
+                notes TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            );
+        """))
+except Exception as e:
+    print(f"[STARTUP WARNING] Migration for cashier_shifts failed: {e}")
 
 # Isolated migration 10 – fix orphaned customers (create missing User records)
 try:

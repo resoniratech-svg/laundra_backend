@@ -49,6 +49,7 @@ from app.models.customer_package import CustomerPackage
 from app.models.package_usage_history import PackageUsageHistory
 from app.models.wallet_pass import WalletPass
 from app.models.driver_settlement import DriverSettlement
+from app.models.cashier_shift import CashierShift
 
 # This ensures all models are registered with SQLAlchemy Base
 
@@ -81,5 +82,6 @@ __all__ = [
     "CustomerPackage",
     "PackageUsageHistory",
     "WalletPass",
-    "DriverSettlement"
+    "DriverSettlement",
+    "CashierShift"
 ]
